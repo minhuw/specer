@@ -1,20 +1,6 @@
 """Tests for the specer package."""
 
-from specer import hello
-
-
-def test_hello() -> None:
-    """Test the hello function."""
-    result = hello()
-    assert result == "Hello from specer!"
-    assert isinstance(result, str)
-
-
-def test_hello_not_empty() -> None:
-    """Test that hello doesn't return empty string."""
-    result = hello()
-    assert result != ""
-    assert len(result) > 0
+import specer
 
 
 class TestSpecerPackage:
@@ -24,8 +10,15 @@ class TestSpecerPackage:
         """Test that the package can be imported successfully."""
         import specer  # noqa: F401
 
-    def test_hello_function_exists(self) -> None:
-        """Test that hello function exists and is callable."""
-        from specer import hello
+    def test_package_has_version(self) -> None:
+        """Test that the package has a version attribute."""
+        assert hasattr(specer, "__version__")
+        assert isinstance(specer.__version__, str)
+        assert specer.__version__ == "0.1.0"
 
-        assert callable(hello)
+    def test_package_metadata(self) -> None:
+        """Test that package metadata is available."""
+        assert hasattr(specer, "__author__")
+        assert hasattr(specer, "__email__")
+        assert specer.__author__ == "minhuw"
+        assert specer.__email__ == "wangmh15@gmail.com"

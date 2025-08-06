@@ -1,11 +1,13 @@
 [project]
 name = "specer"
 version = "0.1.0"
-description = "A modern Python project"
+description = "A CLI wrapper for SPEC CPU 2017 benchmark suite"
 authors = [
     { name = "minhuw", email = "wangmh15@gmail.com" }
 ]
-dependencies = []
+dependencies = [
+    "typer[all]>=0.9.0",
+]
 readme = "README.md"
 requires-python = ">= 3.9"
 license = { text = "MIT" }
@@ -23,6 +25,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.scripts]
+specer = "specer.cli:cli_main"
+
 [project.urls]
 Homepage = "https://github.com/minhuw/specer"
 Repository = "https://github.com/minhuw/specer"
@@ -35,16 +40,14 @@ build-backend = "hatchling.build"
 [tool.rye]
 managed = true
 dev-dependencies = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
     "pytest-xdist>=3.3.1",
     "ruff>=0.1.0",
     "mypy>=1.5.0",
-    "pre-commit>=3.4.0",
-    "black>=23.7.0",
-    "isort>=5.12.0",
+    "pre-commit>=4.2.0",
     "bandit[toml]>=1.7.5",
-    "safety>=2.3.0",
+    "safety>=3.6.0",
     "virtualenv>=20.33.1",
 ]
 
@@ -75,7 +78,7 @@ select = [
     "ERA", # eradicate
 ]
 ignore = [
-    "E501",  # line too long, handled by black
+    "E501",  # line too long, handled by ruff formatter
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
     "SIM102", # use a single if-statement
@@ -84,14 +87,22 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG", "S101"]
 
-[tool.black]
-line-length = 88
-target-version = ["py39", "py310", "py311", "py312", "py313"]
+[tool.ruff.lint.isort]
+# Import sorting configuration (replaces isort)
+force-single-line = false
+known-first-party = ["specer"]
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-line_length = 88
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+# Use spaces for indentation
+indent-style = "space"
+# Respect magic trailing comma
+skip-magic-trailing-comma = false
+# Use line length of 88 (black's default)
+line-ending = "auto"
+
+
 
 [tool.mypy]
 python_version = "3.9"

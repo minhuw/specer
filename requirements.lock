@@ -10,3 +10,19 @@
 #   universal: false
 
 -e file:.
+click==8.2.1
+    # via typer
+markdown-it-py==3.0.0
+    # via rich
+mdurl==0.1.2
+    # via markdown-it-py
+pygments==2.19.2
+    # via rich
+rich==14.1.0
+    # via typer
+shellingham==1.5.4
+    # via typer
+typer==0.16.0
+    # via specer
+typing-extensions==4.14.1
+    # via typer

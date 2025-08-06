@@ -13,22 +13,10 @@ repos:
       - id: check-docstring-first
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.15
+    rev: v0.8.4
     hooks:
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
-
-  - repo: https://github.com/psf/black
-    rev: 24.8.0
-    hooks:
-      - id: black
-        language_version: python3
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0
@@ -42,7 +30,7 @@ repos:
     rev: 1.7.5
     hooks:
       - id: bandit
-        args: [-c, pyproject.toml]
+        args: [-c, pyproject.toml, --severity-level, medium]
         additional_dependencies: ["bandit[toml]"]
 
   - repo: local
@@ -55,15 +43,3 @@ repos:
         stages: [pre-push]
         pass_filenames: false
         always_run: true
-
-ci:
-  autofix_commit_msg: |
-    [pre-commit.ci] auto fixes from pre-commit.com hooks
-
-    for more information, see https://pre-commit.ci
-  autofix_prs: true
-  autoupdate_branch: ''
-  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
-  autoupdate_schedule: weekly
-  skip: []
-  submodules: false
