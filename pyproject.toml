@@ -1,0 +1,145 @@
+[project]
+name = "specer"
+version = "0.1.0"
+description = "A modern Python project"
+authors = [
+    { name = "minhuw", email = "wangmh15@gmail.com" }
+]
+dependencies = []
+readme = "README.md"
+requires-python = ">= 3.9"
+license = { text = "MIT" }
+keywords = ["python"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/minhuw/specer"
+Repository = "https://github.com/minhuw/specer"
+Issues = "https://github.com/minhuw/specer/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-xdist>=3.3.1",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.4.0",
+    "black>=23.7.0",
+    "isort>=5.12.0",
+    "bandit[toml]>=1.7.5",
+    "safety>=2.3.0",
+    "virtualenv>=20.33.1",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/specer"]
+
+# Tool configurations
+[tool.ruff]
+target-version = "py39"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "PTH", # flake8-use-pathlib
+    "ERA", # eradicate
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "SIM102", # use a single if-statement
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG", "S101"]
+
+[tool.black]
+line-length = 88
+target-version = ["py39", "py310", "py311", "py312", "py313"]
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "--cov=specer",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "test"]
+skips = ["B101", "B601"]
