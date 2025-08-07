@@ -1,6 +1,7 @@
 """Install command for SPEC CPU 2017 from local ISO file."""
 
 import contextlib
+import os
 import subprocess
 from pathlib import Path
 from typing import Annotated
@@ -8,7 +9,6 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 
 def install_command(
@@ -38,14 +38,6 @@ def install_command(
             help="Temporary mount point for ISO (auto-created if not specified)",
         ),
     ] = None,
-    accept_license: Annotated[
-        bool,
-        typer.Option(
-            "--accept-license",
-            "-y",
-            help="Accept SPEC license agreement automatically",
-        ),
-    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -64,9 +56,9 @@ def install_command(
 ) -> None:
     """Install SPEC CPU 2017 from a local ISO file.
 
-    This command mounts a SPEC CPU 2017 ISO file and copies its contents
-    to the installation directory. It requires root privileges for mounting
-    and installation.
+    This command mounts a SPEC CPU 2017 ISO file and runs the official
+    install.sh script to perform the installation. It requires root
+    privileges for mounting and installation.
 
     Examples:
         # Basic installation from ISO
@@ -131,21 +123,19 @@ def install_command(
             if not _validate_spec_iso_content(mount_point, console):
                 raise typer.Exit(1)
 
-            # Show license agreement
-            if not accept_license:
-                if not _show_license_agreement(mount_point, console):
-                    raise typer.Exit(1)
-
-            # Copy files to installation directory
-            if not _install_copy_files(mount_point, install_dir, console):
+            # Run official install.sh script
+            if not _run_official_installer(mount_point, install_dir, console):
                 raise typer.Exit(1)
-
-            # Set up environment
-            _install_setup_environment(install_dir, console)
 
             console.print()
             console.print(
-                "✅ [bold green]Installation completed successfully![/bold green]"
+                "✅ [bold green]SPEC CPU 2017 installation completed successfully![/bold green]"
+            )
+            console.print(
+                "🚀 [green]Used official install.sh script for proper installation[/green]"
+            )
+            console.print(
+                "👤 [green]Installed with proper user permissions (no sudo used)[/green]"
             )
             console.print(
                 f"📁 [blue]Installation directory:[/blue] [cyan]{install_dir}[/cyan]"
@@ -153,15 +143,13 @@ def install_command(
             console.print()
             console.print("📝 [bold]Next steps:[/bold]")
             console.print(
-                f"   1. Add to PATH: [cyan]export PATH={install_dir}/bin:$PATH[/cyan]"
+                f"   1. Set SPEC_ROOT: [cyan]export SPEC_ROOT={install_dir}[/cyan]"
             )
             console.print(
-                f"   2. Set SPEC_ROOT: [cyan]export SPEC_ROOT={install_dir}[/cyan]"
+                "   2. Source environment: [cyan]source $SPEC_ROOT/shrc[/cyan]"
             )
-            console.print(
-                "   3. Source environment: [cyan]source $SPEC_ROOT/shrc[/cyan]"
-            )
-            console.print("   4. Run setup: [cyan]specer setup[/cyan]")
+            console.print("   3. Run setup: [cyan]specer setup[/cyan]")
+            console.print("   4. Test installation: [cyan]runcpu --help[/cyan]")
 
         finally:
             # Unmount the ISO
@@ -232,10 +220,22 @@ def _show_dry_run(
         console.print("   └─ Mount point: [cyan]<temporary directory>[/cyan]")
 
     console.print("2. ✅ Validate SPEC CPU 2017 content")
-    console.print("3. 📜 Show license agreement (unless --accept-license)")
-    console.print(f"4. 📂 Copy files to: [cyan]{install_dir}[/cyan]")
-    console.print("5. 🔧 Set up environment files")
-    console.print("6. 🗂️  Unmount ISO")
+    console.print("3. 🚀 Run official install.sh script:")
+    console.print(
+        f"   └─ Command: [cyan]<mount_point>/install.sh -d {install_dir}[/cyan]"
+    )
+    console.print("   └─ Using SPEC's built-in non-interactive installation mode")
+    console.print("   └─ Running as regular user (no sudo required)")
+    console.print("   └─ Auto-confirming prompts for hands-free installation")
+    console.print("   └─ This will:")
+    console.print("      • 🔧 Detect and install appropriate toolset automatically")
+    console.print("      • 📂 Unpack files with proper structure")
+    console.print("      • ✅ Run comprehensive tests")
+    console.print("      • 🔐 Validate checksums")
+    console.print("      • 🛠️  Set up environment")
+    console.print("      • 📺 Show real-time installation output")
+    console.print("      • ⏱️  May take 10-30 minutes")
+    console.print("4. 🗂️  Unmount ISO")
     console.print()
     console.print(
         "💡 [yellow]Run without --dry-run to perform the installation[/yellow]"
@@ -391,82 +391,119 @@ def _show_license_agreement(mount_point: Path, console: Console) -> bool:
     return bool(typer.confirm("Do you accept the license agreement?"))
 
 
-def _install_copy_files(mount_point: Path, install_dir: Path, console: Console) -> bool:
-    """Copy files from mounted ISO to installation directory."""
-    console.print(f"📂 [blue]Copying files to:[/blue] [cyan]{install_dir}[/cyan]")
+def _run_official_installer(
+    mount_point: Path, install_dir: Path, console: Console
+) -> bool:
+    """Run the official SPEC CPU 2017 install.sh script using its built-in non-interactive mode."""
+    console.print("🚀 [blue]Running official SPEC install.sh script...[/blue]")
+    console.print(f"📂 [blue]Installing to:[/blue] [cyan]{install_dir}[/cyan]")
+    console.print(
+        "⏱️  [yellow]This may take 10-30 minutes depending on your system[/yellow]"
+    )
 
-    # Create installation directory
-    install_dir.mkdir(parents=True, exist_ok=True)
+    # Ensure install directory parent exists
+    install_dir.parent.mkdir(parents=True, exist_ok=True)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Copying SPEC CPU 2017 files...", total=None)
+    # Prepare the install.sh command
+    install_script = mount_point / "install.sh"
+    if not install_script.exists():
+        console.print(f"❌ [red]install.sh not found at {install_script}[/red]")
+        return False
 
-        try:
-            # Use rsync if available for better progress, otherwise use cp
-            try:
-                copy_cmd = [
-                    "sudo",
-                    "rsync",
-                    "-av",
-                    "--progress",
-                    f"{mount_point}/",
-                    str(install_dir),
-                ]
-                result = subprocess.run(copy_cmd, capture_output=True, text=True)
-            except FileNotFoundError:
-                # Fallback to cp if rsync is not available
-                copy_cmd = ["sudo", "cp", "-r", f"{mount_point}/.", str(install_dir)]
-                result = subprocess.run(copy_cmd, capture_output=True, text=True)
+    # Build command with destination directory (the -d flag enables non-interactive mode)
+    install_cmd = [str(install_script), "-d", str(install_dir)]
 
-            progress.update(task, completed=True)
+    console.print(f"🔧 [blue]Running:[/blue] [cyan]{' '.join(install_cmd)}[/cyan]")
+    console.print(
+        "ℹ️  [cyan]Using SPEC's built-in non-interactive installation mode[/cyan]"
+    )
+    console.print("👤 [green]Running as regular user (no sudo required)[/green]")
 
-            if result.returncode == 0:
-                console.print("✅ [green]Files copied successfully[/green]")
-                return True
-            else:
-                console.print(f"❌ [red]Copy failed:[/red] {result.stderr}")
-                return False
+    # Set up environment for the installer
+    env = os.environ.copy()
+    env.pop("SPEC", None)  # Clear any existing SPEC environment variable
 
-        except Exception as e:
-            progress.update(task, completed=True)
-            console.print(f"❌ [red]Error copying files: {e}[/red]")
+    try:
+        return _run_installer_simple(install_cmd, mount_point, env, console)
+
+    except subprocess.TimeoutExpired:
+        console.print("❌ [red]Installation timed out[/red]")
+        return False
+    except Exception as e:
+        console.print(f"❌ [red]Error running installer: {e}[/red]")
+        return False
+
+
+def _run_installer_simple(
+    install_cmd: list[str], mount_point: Path, env: dict[str, str], console: Console
+) -> bool:
+    """Run installer with real-time output streaming using official non-interactive mode."""
+    console.print("🔄 [blue]Starting installation process...[/blue]")
+    console.print("📺 [cyan]Live output from install.sh:[/cyan]")
+    console.print("─" * 80, style="dim")
+
+    try:
+        # Run with stdin pipe to automatically answer confirmation prompts
+        process = subprocess.Popen(
+            install_cmd,
+            cwd=str(mount_point),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        )
+
+        # Stream output in real-time and automatically respond to prompts
+        while True:
+            if process.stdout is None:
+                break
+            output = process.stdout.readline()
+            if output == "" and process.poll() is not None:
+                break
+            if output:
+                # Print each line directly for real-time viewing
+                console.print(output.rstrip(), highlight=False)
+
+                # Check for the confirmation prompt and auto-respond
+                if "Is this correct? (Please enter 'yes' or 'no')" in output:
+                    try:
+                        console.print("[dim]Auto-responding: yes[/dim]")
+                        if process.stdin is not None:
+                            process.stdin.write("yes\n")
+                            process.stdin.flush()
+                    except (BrokenPipeError, OSError):
+                        # Process may have closed stdin
+                        pass
+
+        # Wait for process to complete and get return code
+        return_code = process.wait()
+
+        console.print("─" * 80, style="dim")
+
+        if return_code == 0:
+            console.print(
+                "✅ [green]SPEC CPU 2017 installation completed successfully![/green]"
+            )
+            return True
+        else:
+            console.print(
+                f"❌ [red]Installation failed with exit code {return_code}[/red]"
+            )
             return False
 
+    except KeyboardInterrupt:
+        console.print("\n❌ [red]Installation cancelled by user[/red]")
+        if "process" in locals():
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        return False
 
-def _install_setup_environment(install_dir: Path, console: Console) -> None:
-    """Set up SPEC environment files."""
-    console.print("🔧 [blue]Setting up environment...[/blue]")
-
-    # Make scripts executable
-    bin_dir = install_dir / "bin"
-    if bin_dir.exists():
-        try:
-            subprocess.run(["sudo", "chmod", "+x", "-R", str(bin_dir)], check=True)
-            console.print("✅ [green]Made bin scripts executable[/green]")
-        except subprocess.CalledProcessError:
-            console.print("⚠️  [yellow]Could not make bin scripts executable[/yellow]")
-
-    # Set ownership to current user if possible
-    import os
-
-    current_user = os.getenv("USER")
-    if current_user:
-        try:
-            subprocess.run(
-                [
-                    "sudo",
-                    "chown",
-                    "-R",
-                    f"{current_user}:{current_user}",
-                    str(install_dir),
-                ],
-                check=True,
-            )
-            console.print(f"✅ [green]Changed ownership to {current_user}[/green]")
-        except subprocess.CalledProcessError:
-            console.print("⚠️  [yellow]Could not change ownership[/yellow]")
+    except Exception as e:
+        console.print(f"❌ [red]Error during installation: {e}[/red]")
+        return False
