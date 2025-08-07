@@ -1,5 +1,6 @@
 """Compile command for SPEC CPU 2017 benchmarks."""
 
+import contextlib
 import re
 from pathlib import Path
 from typing import Annotated
@@ -12,6 +13,7 @@ from specer.utils import (
     convert_benchmark_names,
     detect_suite_preference,
     execute_runcpu,
+    generate_config_from_template,
     validate_and_get_spec_root,
     validate_numa_topology,
 )
@@ -25,13 +27,13 @@ def compile_command(
         ),
     ],
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",
-            help="Configuration file to use",
+            help="Configuration file to use (auto-generated from template if not specified)",
         ),
-    ],
+    ] = None,
     spec_root: Annotated[
         Path | None,
         typer.Option(
@@ -99,11 +101,11 @@ def compile_command(
             help="Prefer rate versions for simple benchmark names (e.g., gcc -> 502.gcc_r)",
         ),
     ] = False,
-    _cores: Annotated[
+    cores: Annotated[
         int | None,
         typer.Option(
             "--cores",
-            help="Number of CPU cores to use for compilation (parallel build processes)",
+            help="Number of CPU cores to use for compilation (affects auto-generated config)",
         ),
     ] = None,
     numa_node: Annotated[
@@ -203,14 +205,46 @@ def compile_command(
     if dry_run and converted_benchmarks != benchmarks:
         typer.echo(f"Converted benchmark names: {benchmarks} -> {converted_benchmarks}")
 
-    # Resolve the effective spec_root
+    # Resolve the effective spec_root early since it's needed for config generation
     effective_spec_root = validate_and_get_spec_root(spec_root)
+
+    # Handle config generation and validation
+    effective_config = config
+    generated_config_path = None
+
+    # Always auto-generate config if no config is provided
+    if config is None:
+        # Automatically generate config from template
+        generated_config_path = generate_config_from_template(
+            cores, effective_spec_root, tune
+        )
+        if generated_config_path:
+            effective_config = generated_config_path
+            if dry_run:
+                if cores is not None:
+                    typer.echo(
+                        f"Auto-generated config file with {cores} cores: {generated_config_path}"
+                    )
+                else:
+                    typer.echo(f"Auto-generated config file: {generated_config_path}")
+        else:
+            typer.echo(
+                "Error: Could not auto-generate config file from template", err=True
+            )
+            raise typer.Exit(1)
+
+    if effective_config is None:
+        typer.echo(
+            "Error: Failed to create config file. Please check template file exists.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     # Build the runcpu command
     cmd = build_runcpu_command(
         action="build",
         benchmarks=converted_benchmarks,
-        config=config,
+        config=effective_config,
         tune=tune,
         spec_root=effective_spec_root,
         verbose=verbose,
@@ -230,6 +264,9 @@ def compile_command(
                 )
         else:
             typer.echo(f"Would execute: {' '.join(cmd)}")
+        # Clean up generated config file if in dry-run mode
+        if generated_config_path:
+            Path(generated_config_path).unlink()
         return
 
     # Execute the command
@@ -240,3 +277,8 @@ def compile_command(
         cpu_cores=cpu_cores,
         numa_memory=numa_memory,
     )
+
+    # Clean up generated config file after execution
+    if generated_config_path:
+        with contextlib.suppress(OSError):
+            Path(generated_config_path).unlink()
