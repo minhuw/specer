@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -49,7 +49,7 @@ class ProcessResult:
         self.stderr = stderr
 
 
-def validate_and_get_spec_root(spec_root: Optional[Path]) -> Path:
+def validate_and_get_spec_root(spec_root: Path | None) -> Path:
     """Validate spec_root argument and return effective path.
 
     Args:
@@ -158,7 +158,7 @@ def detect_suite_preference(benchmarks: list[str]) -> tuple[bool, bool]:
     return speed_count > rate_count, rate_count > speed_count
 
 
-def detect_gcc_version() -> Optional[int]:
+def detect_gcc_version() -> int | None:
     """Detect the GCC version using 'which gcc' and '--version'.
 
     Returns:
@@ -206,7 +206,7 @@ def detect_gcc_version() -> Optional[int]:
         return None
 
 
-def detect_gcc_path() -> Optional[str]:
+def detect_gcc_path() -> str | None:
     """Detect the GCC installation path using 'which gcc'.
 
     Returns:
@@ -244,10 +244,10 @@ def detect_gcc_path() -> Optional[str]:
 
 
 def generate_config_from_template(
-    cores: Optional[int] = None,
-    spec_root: Optional[Path] = None,
-    tune: Optional[str] = None,
-) -> Optional[str]:
+    cores: int | None = None,
+    spec_root: Path | None = None,
+    tune: str | None = None,
+) -> str | None:
     """Generate a SPEC CPU 2017 config file from SPEC's official template.
 
     Uses the Example-gcc-linux-x86.cfg template from the SPEC installation
@@ -352,19 +352,19 @@ def build_runcpu_command(
     action: str,
     benchmarks: list[str],
     config: str,
-    tune: Optional[str] = None,
-    spec_root: Optional[Path] = None,
+    tune: str | None = None,
+    spec_root: Path | None = None,
     verbose: bool = False,
     rebuild: bool = False,
-    parallel_test: Optional[int] = None,
+    parallel_test: int | None = None,
     ignore_errors: bool = False,
-    size: Optional[str] = None,
-    copies: Optional[int] = None,
-    threads: Optional[int] = None,
-    iterations: Optional[int] = None,
+    size: str | None = None,
+    copies: int | None = None,
+    threads: int | None = None,
+    iterations: int | None = None,
     reportable: bool = False,
     noreportable: bool = False,
-    output_formats: Optional[str] = None,
+    output_formats: str | None = None,
 ) -> list[str]:
     """Build the runcpu command with the given parameters."""
     # Start with the base command
@@ -414,9 +414,22 @@ def build_runcpu_command(
     elif noreportable:
         cmd.append("--noreportable")
 
-    # Add verbose
+    # Add output formats (default to rsf,pdf for speed, allow all for compatibility)
+    # IMPORTANT: Must come before --verbose since --verbose can take a numeric parameter
+    if output_formats is not None:
+        if output_formats.lower() == "all":
+            # Use SPEC default (all formats: rsf, html, pdf, txt, ps)
+            pass  # Don't add --output_format to use SPEC defaults
+        else:
+            # Use specified formats
+            cmd.extend(["--output_format", output_formats])
+    else:
+        # Default: only rsf and pdf for speed and efficiency
+        cmd.extend(["--output_format", "rsf,pdf"])
+
+    # Add verbose (must be after --output_format to avoid conflicts)
     if verbose:
-        cmd.append("--verbose")
+        cmd.append("--verbose=5")  # Use verbosity level 5 for detailed output
 
     # Add rebuild
     if rebuild:
@@ -430,18 +443,6 @@ def build_runcpu_command(
     if ignore_errors:
         cmd.append("--ignore_errors")
 
-    # Add output formats (default to rsf,pdf for speed, allow all for compatibility)
-    if output_formats is not None:
-        if output_formats.lower() == "all":
-            # Use SPEC default (all formats: rsf, html, pdf, txt, ps)
-            pass  # Don't add --output_format to use SPEC defaults
-        else:
-            # Use specified formats
-            cmd.extend(["--output_format", output_formats])
-    else:
-        # Default: only rsf and pdf for speed and efficiency
-        cmd.extend(["--output_format", "rsf,pdf"])
-
     # Add benchmarks (skip for update action)
     if action != "update":
         cmd.extend(benchmarks)
@@ -449,7 +450,7 @@ def build_runcpu_command(
     return cmd
 
 
-def validate_numa_topology() -> Optional[dict[str, Any]]:
+def validate_numa_topology() -> dict[str, Any] | None:
     """Validate NUMA topology and return available nodes and CPUs.
 
     Returns:
@@ -502,9 +503,9 @@ def validate_numa_topology() -> Optional[dict[str, Any]]:
 
 def build_affinity_command(
     base_cmd: list[str],
-    numa_node: Optional[int] = None,
-    cpu_cores: Optional[str] = None,
-    numa_memory: Optional[bool] = None,
+    numa_node: int | None = None,
+    cpu_cores: str | None = None,
+    numa_memory: bool | None = None,
 ) -> list[str]:
     """Build command with NUMA/CPU affinity using numactl or taskset.
 
@@ -560,7 +561,7 @@ def build_affinity_command(
     return base_cmd
 
 
-def parse_benchmark_from_output(line: str) -> Optional[str]:
+def parse_benchmark_from_output(line: str) -> str | None:
     """Parse benchmark name from SPEC output line.
 
     Args:
@@ -591,13 +592,13 @@ def execute_runcpu(
     cmd: list[str],
     verbose: bool = False,
     parse_results: bool = False,
-    spec_root: Optional[Path] = None,
+    spec_root: Path | None = None,
     hide_logs: bool = False,
     show_progress: bool = True,
-    numa_node: Optional[int] = None,
-    cpu_cores: Optional[str] = None,
-    numa_memory: Optional[bool] = None,
-) -> Optional[dict[str, Any]]:
+    numa_node: int | None = None,
+    cpu_cores: str | None = None,
+    numa_memory: bool | None = None,
+) -> dict[str, Any] | None:
     """Execute the runcpu command and optionally parse results.
 
     Args:
@@ -740,7 +741,7 @@ def execute_runcpu(
 
 def display_results_with_rich(
     result_info: dict[str, Any],
-    console: Optional[Console] = None,
+    console: Console | None = None,
     show_timing: bool = False,
 ) -> None:
     """Display benchmark results using Rich formatting.
@@ -811,17 +812,17 @@ def display_results_with_rich(
                 status = "[yellow]Warning[/yellow]"
                 ratio = (
                     f"{data.get('ratio', 'N/A'):.2f}"
-                    if isinstance(data.get("ratio"), (int, float))
+                    if isinstance(data.get("ratio"), int | float)
                     else "N/A"
                 )
                 time = (
                     f"{data.get('time', 'N/A'):.1f}"
-                    if isinstance(data.get("time"), (int, float))
+                    if isinstance(data.get("time"), int | float)
                     else "N/A"
                 )
                 reference = (
                     f"{data.get('reference', 'N/A'):.0f}"
-                    if isinstance(data.get("reference"), (int, float))
+                    if isinstance(data.get("reference"), int | float)
                     else "N/A"
                 )
                 copies = (
@@ -838,17 +839,17 @@ def display_results_with_rich(
                 status = "[green]Success[/green]"
                 ratio = (
                     f"{data.get('ratio', 'N/A'):.2f}"
-                    if isinstance(data.get("ratio"), (int, float))
+                    if isinstance(data.get("ratio"), int | float)
                     else "N/A"
                 )
                 time = (
                     f"{data.get('time', 'N/A'):.1f}"
-                    if isinstance(data.get("time"), (int, float))
+                    if isinstance(data.get("time"), int | float)
                     else "N/A"
                 )
                 reference = (
                     f"{data.get('reference', 'N/A'):.0f}"
-                    if isinstance(data.get("reference"), (int, float))
+                    if isinstance(data.get("reference"), int | float)
                     else "N/A"
                 )
                 copies = (
@@ -908,9 +909,9 @@ def display_results_with_rich(
 
 def save_results_to_json(
     result_info: dict[str, Any],
-    output_file: Optional[str] = None,
-    benchmarks: Optional[list[str]] = None,
-    config: Optional[str] = None,
+    output_file: str | None = None,
+    benchmarks: list[str] | None = None,
+    config: str | None = None,
 ) -> str:
     """Save benchmark results to JSON file.
 

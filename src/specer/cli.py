@@ -1,6 +1,6 @@
 """CLI interface for SPEC CPU 2017 benchmark wrapper."""
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -33,7 +33,7 @@ def version_callback(value: bool) -> None:
 @app.callback()  # type: ignore[misc]
 def main(
     _version: Annotated[
-        Optional[bool],
+        bool | None,
         typer.Option(
             "--version",
             "-V",

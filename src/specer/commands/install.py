@@ -1,9 +1,9 @@
-"""Install command for SPEC CPU 2017 from ISO."""
+"""Install command for SPEC CPU 2017 from local ISO file."""
 
+import contextlib
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -14,7 +14,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 def install_command(
     iso_path: Annotated[
         Path,
-        typer.Argument(help="Path to SPEC CPU 2017 ISO file (e.g., cpu2017-1.1.9.iso)"),
+        typer.Argument(
+            help="Path to SPEC CPU 2017 ISO file",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
     ],
     install_dir: Annotated[
         Path,
@@ -25,7 +31,7 @@ def install_command(
         ),
     ] = Path("/opt/spec2017"),
     mount_point: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--mount-point",
             "-m",
@@ -44,421 +50,423 @@ def install_command(
         bool,
         typer.Option(
             "--dry-run",
-            "-n",
-            help="Show commands that would be executed without running them",
+            help="Show what would be done without executing",
         ),
     ] = False,
-    verbose: Annotated[
+    force: Annotated[
         bool,
         typer.Option(
-            "--verbose",
-            "-v",
-            help="Enable verbose output during installation",
+            "--force",
+            "-f",
+            help="Force installation even if target directory exists",
         ),
     ] = False,
-    cleanup: Annotated[
-        bool,
-        typer.Option(
-            "--cleanup/--no-cleanup",
-            help="Clean up temporary files and mount points after installation (default: True)",
-        ),
-    ] = True,
-    sudo_password: Annotated[
-        Optional[str],
-        typer.Option(
-            "--sudo-password",
-            help="Sudo password for mount operations (will prompt if not provided and needed)",
-        ),
-    ] = None,
 ) -> None:
-    """Install SPEC CPU 2017 from ISO file to a complete working installation.
+    """Install SPEC CPU 2017 from a local ISO file.
 
-    This command handles the complete installation process:
-    1. Validates the ISO file and system requirements
-    2. Creates and mounts the ISO (requires sudo for mount operations)
-    3. Runs SPEC's install.sh script
-    4. Sets up the environment and validates the installation
-    5. Runs initial setup and validation tests
+    This command mounts a SPEC CPU 2017 ISO file and copies its contents
+    to the installation directory. It requires root privileges for mounting
+    and installation.
 
     Examples:
-        # Basic installation
-        specer install /path/to/cpu2017-1.1.9.iso
+        # Basic installation from ISO
+        specer install cpu2017-1.1.9.iso
 
-        # Custom installation directory
-        specer install /path/to/cpu2017-1.1.9.iso --install-dir /home/user/spec2017
+        # Install to custom directory
+        specer install cpu2017-1.1.9.iso --install-dir ~/spec2017
 
-        # Accept license automatically (for automation)
-        specer install /path/to/cpu2017-1.1.9.iso --accept-license
+        # Auto-accept license
+        specer install cpu2017-1.1.9.iso --accept-license
 
         # Dry run to see what would happen
-        specer install /path/to/cpu2017-1.1.9.iso --dry-run
-
-        # Verbose installation with custom mount point
-        specer install /path/to/cpu2017-1.1.9.iso --mount-point /tmp/spec_mount --verbose
+        specer install cpu2017-1.1.9.iso --dry-run
     """
     console = Console()
-
-    # Validate inputs
-    if not iso_path.exists():
-        console.print(f"❌ [red]Error: ISO file not found: {iso_path}[/red]")
-        raise typer.Exit(1)
-
-    if iso_path.suffix.lower() != ".iso":
-        console.print("⚠️  [yellow]Warning: File doesn't have .iso extension[/yellow]")
-        if not typer.confirm("Continue anyway?"):
-            raise typer.Exit(1)
-
-    # Check if install directory already exists
-    if install_dir.exists() and any(install_dir.iterdir()):
-        console.print(
-            f"⚠️  [yellow]Warning: Installation directory already exists and is not empty: {install_dir}[/yellow]"
-        )
-        if not dry_run and not typer.confirm(
-            "Continue with installation? This may overwrite existing files."
-        ):
-            raise typer.Exit(1)
-
-    # Create temporary mount point if not specified
-    if mount_point is None:
-        temp_dir = tempfile.mkdtemp(prefix="spec_mount_")
-        mount_point = Path(temp_dir)
-    elif not mount_point.exists():
-        mount_point.mkdir(parents=True, exist_ok=True)
 
     console.print()
     console.print(
         Panel.fit(
-            "[bold blue]🚀 SPEC CPU 2017 Installation[/bold blue]", border_style="blue"
+            "[bold blue]🛠️  SPEC CPU 2017 Installation[/bold blue]", border_style="blue"
         )
     )
 
-    console.print(f"📁 ISO File: [cyan]{iso_path}[/cyan]")
-    console.print(f"📁 Install Directory: [cyan]{install_dir}[/cyan]")
-    console.print(f"📁 Mount Point: [cyan]{mount_point}[/cyan]")
-    console.print()
+    # Validate ISO file
+    if not _validate_iso_file(iso_path, console):
+        raise typer.Exit(1)
+
+    # Check if installation directory already exists
+    if install_dir.exists() and not force:
+        console.print(
+            f"❌ [red]Installation directory already exists: {install_dir}[/red]"
+        )
+        console.print(
+            "💡 [yellow]Use --force to overwrite or choose a different directory[/yellow]"
+        )
+        raise typer.Exit(1)
 
     if dry_run:
-        console.print(
-            "[bold yellow]🔍 DRY RUN MODE - No actual changes will be made[/bold yellow]"
-        )
-        console.print()
-
-    try:
-        # Step 1: Mount the ISO
-        _install_mount_iso(
-            iso_path, mount_point, dry_run, verbose, console, sudo_password
-        )
-
-        # Step 2: Run SPEC installation
-        _install_run_spec_installer(
-            mount_point, install_dir, accept_license, dry_run, verbose, console
-        )
-
-        # Step 3: Set up environment and validate
-        if not dry_run:
-            _install_setup_environment(install_dir, console)
-
-        # Step 4: Validate installation
-        if not dry_run:
-            _install_validate_installation(install_dir, console)
-
-        console.print()
-        console.print(
-            Panel.fit(
-                "[bold green]✅ SPEC CPU 2017 Installation Complete![/bold green]",
-                border_style="green",
-            )
-        )
-
-        if not dry_run:
-            console.print("\n📝 [bold]Next Steps:[/bold]")
-            console.print(
-                f"   1. Set environment: [cyan]export SPEC_PATH={install_dir}[/cyan]"
-            )
-            console.print(
-                "   2. Test installation: [cyan]specer run gcc --cores 4 --dry-run[/cyan]"
-            )
-            console.print(
-                "   3. Run your first benchmark: [cyan]specer run gcc --cores 4[/cyan]"
-            )
-
-    except Exception as e:
-        console.print(f"\n❌ [red]Installation failed: {e}[/red]")
-        raise typer.Exit(1) from e
-
-    finally:
-        # Cleanup
-        if cleanup and not dry_run:
-            _install_cleanup(mount_point, verbose, console)
-
-
-def _install_mount_iso(
-    iso_path: Path,
-    mount_point: Path,
-    dry_run: bool,
-    verbose: bool,
-    console: Console,
-    sudo_password: Optional[str] = None,
-) -> None:
-    """Mount the SPEC CPU 2017 ISO file."""
-    console.print("🔧 [bold blue]Step 1: Mounting ISO file...[/bold blue]")
-
-    # Check if already mounted
-    try:
-        result = subprocess.run(["mount"], capture_output=True, text=True, check=True)
-        if str(iso_path) in result.stdout and str(mount_point) in result.stdout:
-            console.print(f"✅ ISO already mounted at {mount_point}")
-            return
-    except subprocess.SubprocessError:
-        pass
-
-    mount_cmd = ["sudo", "mount", "-o", "loop", str(iso_path), str(mount_point)]
-
-    if dry_run:
-        console.print(f"Would execute: [cyan]{' '.join(mount_cmd)}[/cyan]")
+        _show_dry_run(iso_path, install_dir, mount_point, console)
         return
 
-    if verbose:
-        console.print(f"Executing: [cyan]{' '.join(mount_cmd)}[/cyan]")
+    import tempfile
 
-    try:
-        # Create mount point if it doesn't exist
+    # Create temporary mount point if not specified
+    temp_mount_dir = None
+    if mount_point is None:
+        temp_mount_dir = Path(tempfile.mkdtemp(prefix="spec2017_mount_"))
+        mount_point = temp_mount_dir
+    else:
         mount_point.mkdir(parents=True, exist_ok=True)
 
-        # Use sudo to mount the ISO
-        if sudo_password:
-            # Use sudo with password
-            mount_process = subprocess.Popen(
-                mount_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            stdout, stderr = mount_process.communicate(input=sudo_password + "\n")
-
-            if mount_process.returncode != 0:
-                raise subprocess.SubprocessError(f"Mount failed: {stderr}")
-        else:
-            # Let sudo prompt for password
-            subprocess.run(mount_cmd, check=True)
-
-        console.print(f"✅ ISO mounted successfully at [cyan]{mount_point}[/cyan]")
-
-        # Verify mount
-        if not (mount_point / "install.sh").exists():
-            raise FileNotFoundError(
-                "install.sh not found in mounted ISO - this may not be a valid SPEC CPU 2017 ISO"
-            )
-
-    except subprocess.SubprocessError as e:
-        raise Exception(f"Failed to mount ISO: {e}") from e
-    except FileNotFoundError as e:
-        raise Exception(f"Invalid SPEC ISO: {e}") from e
-
-
-def _install_run_spec_installer(
-    mount_point: Path,
-    install_dir: Path,
-    accept_license: bool,
-    dry_run: bool,
-    verbose: bool,
-    console: Console,
-) -> None:
-    """Run the SPEC CPU 2017 installer script."""
-    console.print("🔧 [bold blue]Step 2: Running SPEC installer...[/bold blue]")
-
-    install_script = mount_point / "install.sh"
-    if not install_script.exists():
-        raise FileNotFoundError(f"SPEC installer not found: {install_script}")
-
-    # Prepare installation command
-    install_cmd = ["bash", str(install_script), "-d", str(install_dir)]
-
-    if accept_license:
-        install_cmd.append("-f")  # Force/accept license
-
-    if dry_run:
-        console.print(f"Would execute: [cyan]{' '.join(install_cmd)}[/cyan]")
-        console.print(f"Would install SPEC to: [cyan]{install_dir}[/cyan]")
-        return
-
-    if verbose:
-        console.print(f"Executing: [cyan]{' '.join(install_cmd)}[/cyan]")
-
     try:
-        # Create install directory if it doesn't exist
-        install_dir.parent.mkdir(parents=True, exist_ok=True)
+        # Mount the ISO
+        console.print(f"🗂️  [blue]Mounting ISO:[/blue] [cyan]{iso_path}[/cyan]")
+        console.print(f"📁 [blue]Mount point:[/blue] [cyan]{mount_point}[/cyan]")
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            TimeElapsedColumn(),
-            console=console,
-            transient=False,
-        ) as progress:
-            task = progress.add_task(
-                description="Installing SPEC CPU 2017...", total=None
+        if not _install_mount_iso(iso_path, mount_point, console):
+            raise typer.Exit(1)
+
+        try:
+            # Check if it's a valid SPEC CPU 2017 ISO
+            if not _validate_spec_iso_content(mount_point, console):
+                raise typer.Exit(1)
+
+            # Show license agreement
+            if not accept_license:
+                if not _show_license_agreement(mount_point, console):
+                    raise typer.Exit(1)
+
+            # Copy files to installation directory
+            if not _install_copy_files(mount_point, install_dir, console):
+                raise typer.Exit(1)
+
+            # Set up environment
+            _install_setup_environment(install_dir, console)
+
+            console.print()
+            console.print(
+                "✅ [bold green]Installation completed successfully![/bold green]"
             )
-
-            # Run installer
-            process = subprocess.Popen(
-                install_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                cwd=str(mount_point),
+            console.print(
+                f"📁 [blue]Installation directory:[/blue] [cyan]{install_dir}[/cyan]"
             )
+            console.print()
+            console.print("📝 [bold]Next steps:[/bold]")
+            console.print(
+                f"   1. Add to PATH: [cyan]export PATH={install_dir}/bin:$PATH[/cyan]"
+            )
+            console.print(
+                f"   2. Set SPEC_ROOT: [cyan]export SPEC_ROOT={install_dir}[/cyan]"
+            )
+            console.print(
+                "   3. Source environment: [cyan]source $SPEC_ROOT/shrc[/cyan]"
+            )
+            console.print("   4. Run setup: [cyan]specer setup[/cyan]")
 
-            output_lines = []
-            if process.stdout:
-                for line in iter(process.stdout.readline, ""):
-                    output_lines.append(line)
-                    if verbose:
-                        console.print(line.rstrip())
+        finally:
+            # Unmount the ISO
+            _install_unmount_iso(mount_point, console)
 
-                    # Update progress based on installer output
-                    if "extracting" in line.lower() or "installing" in line.lower():
-                        progress.update(
-                            task, description=f"Installing: {line.strip()[:50]}..."
-                        )
-
-            process.wait()
-
-            if process.returncode != 0:
-                console.print("\n❌ [red]Installation failed. Output:[/red]")
-                for line in output_lines[-20:]:  # Show last 20 lines
-                    console.print(line.rstrip())
-                raise subprocess.SubprocessError(
-                    f"SPEC installer failed with exit code {process.returncode}"
-                )
-
-        console.print("✅ SPEC CPU 2017 installed successfully")
-
-    except subprocess.SubprocessError as e:
-        raise Exception(f"SPEC installation failed: {e}") from e
+    finally:
+        # Clean up temporary mount directory
+        if temp_mount_dir and temp_mount_dir.exists():
+            with contextlib.suppress(Exception):
+                temp_mount_dir.rmdir()  # Best effort cleanup
 
 
-def _install_setup_environment(
-    install_dir: Path,
-    console: Console,
-) -> None:
-    """Set up the SPEC environment and perform initial setup."""
-    console.print("🔧 [bold blue]Step 3: Setting up environment...[/bold blue]")
+def _validate_iso_file(iso_path: Path, console: Console) -> bool:
+    """Validate that the file appears to be a valid ISO."""
+    console.print(f"🔍 [blue]Validating ISO file:[/blue] [cyan]{iso_path}[/cyan]")
 
-    # Check if SPEC installation looks correct
-    runcpu_path = install_dir / "bin" / "runcpu"
-    if not runcpu_path.exists():
-        raise FileNotFoundError(
-            f"runcpu not found at {runcpu_path} - installation may have failed"
-        )
+    # Check file size
+    file_size = iso_path.stat().st_size
+    size_mb = file_size / (1024 * 1024)
+    console.print(f"📊 [blue]File size:[/blue] [cyan]{size_mb:.2f} MB[/cyan]")
 
-    # Source the SPEC environment
-    shrc_path = install_dir / "shrc"
-    if not shrc_path.exists():
-        console.print(
-            "⚠️  [yellow]Warning: shrc file not found - environment may not be properly set up[/yellow]"
-        )
-    else:
-        console.print(f"✅ Found SPEC environment file: [cyan]{shrc_path}[/cyan]")
+    if size_mb < 100:
+        console.print("⚠️  [yellow]Warning: File is quite small for a SPEC ISO[/yellow]")
 
-    console.print("✅ Environment setup complete")
-
-
-def _install_validate_installation(
-    install_dir: Path,
-    console: Console,
-) -> None:
-    """Validate the SPEC installation by running basic tests."""
-    console.print("🔧 [bold blue]Step 4: Validating installation...[/bold blue]")
-
-    runcpu_path = install_dir / "bin" / "runcpu"
-
-    # Test 1: Check if runcpu is executable
+    # Use 'file' command to check file type if available
     try:
         result = subprocess.run(
-            [str(runcpu_path), "--help"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(install_dir),
+            ["file", str(iso_path)], capture_output=True, text=True, timeout=10
         )
 
-        if result.returncode != 0:
-            raise subprocess.SubprocessError(f"runcpu --help failed: {result.stderr}")
+        if result.returncode == 0:
+            file_type = result.stdout.strip()
+            console.print(f"🔍 [blue]File type:[/blue] [cyan]{file_type}[/cyan]")
 
-        console.print("✅ runcpu executable test passed")
+            if "ISO 9660" in file_type or "CD-ROM filesystem" in file_type:
+                console.print("✅ [green]File appears to be a valid ISO[/green]")
+            else:
+                console.print(
+                    "⚠️  [yellow]Warning: File may not be an ISO format[/yellow]"
+                )
+                if not typer.confirm("Continue anyway?"):
+                    return False
+        else:
+            console.print("⚠️  [yellow]Could not determine file type[/yellow]")
 
-    except subprocess.SubprocessError as e:
-        raise Exception(f"runcpu validation failed: {e}") from e
-    except subprocess.TimeoutExpired as e:
-        raise Exception(
-            "runcpu --help timed out - installation may be incomplete"
-        ) from e
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        console.print(
+            "⚠️  [yellow]'file' command not available, skipping type check[/yellow]"
+        )
 
-    # Test 2: Check for basic benchmark directories
-    benchmarks_dir = install_dir / "benchspec" / "CPU"
-    if not benchmarks_dir.exists():
-        raise FileNotFoundError(f"Benchmarks directory not found: {benchmarks_dir}")
+    return True
 
-    # Count available benchmarks
+
+def _show_dry_run(
+    iso_path: Path, install_dir: Path, mount_point: Path | None, console: Console
+) -> None:
+    """Show what would be done in a dry run."""
+    console.print()
+    console.print(
+        "🔍 [bold blue]Dry Run - Actions that would be performed:[/bold blue]"
+    )
+    console.print()
+    console.print(f"1. 🗂️  Mount ISO: [cyan]{iso_path}[/cyan]")
+
+    if mount_point:
+        console.print(f"   └─ Mount point: [cyan]{mount_point}[/cyan]")
+    else:
+        console.print("   └─ Mount point: [cyan]<temporary directory>[/cyan]")
+
+    console.print("2. ✅ Validate SPEC CPU 2017 content")
+    console.print("3. 📜 Show license agreement (unless --accept-license)")
+    console.print(f"4. 📂 Copy files to: [cyan]{install_dir}[/cyan]")
+    console.print("5. 🔧 Set up environment files")
+    console.print("6. 🗂️  Unmount ISO")
+    console.print()
+    console.print(
+        "💡 [yellow]Run without --dry-run to perform the installation[/yellow]"
+    )
+
+
+def _install_mount_iso(iso_path: Path, mount_point: Path, console: Console) -> bool:
+    """Mount the ISO file."""
     try:
-        benchmark_dirs = [
-            d
-            for d in benchmarks_dir.iterdir()
-            if d.is_dir() and d.name.startswith(("5", "6"))
+        mount_cmd = [
+            "sudo",
+            "mount",
+            "-t",
+            "iso9660",
+            "-o",
+            "loop,ro",
+            str(iso_path),
+            str(mount_point),
         ]
-        console.print(f"✅ Found {len(benchmark_dirs)} benchmark suites")
 
-        if len(benchmark_dirs) < 20:  # SPEC CPU 2017 should have 23 benchmarks
+        console.print(f"🔧 [blue]Running:[/blue] [cyan]{' '.join(mount_cmd)}[/cyan]")
+
+        result = subprocess.run(mount_cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            console.print("✅ [green]ISO mounted successfully[/green]")
+            return True
+        else:
+            console.print(f"❌ [red]Mount failed:[/red] {result.stderr}")
+
+            # Try fallback mount options
+            console.print("🔄 [yellow]Trying fallback mount options...[/yellow]")
+            fallback_cmd = [
+                "sudo",
+                "mount",
+                "-o",
+                "loop,ro",
+                str(iso_path),
+                str(mount_point),
+            ]
+
             console.print(
-                "⚠️  [yellow]Warning: Expected ~23 benchmarks, installation may be incomplete[/yellow]"
+                f"🔧 [blue]Running:[/blue] [cyan]{' '.join(fallback_cmd)}[/cyan]"
+            )
+            fallback_result = subprocess.run(
+                fallback_cmd, capture_output=True, text=True
             )
 
+            if fallback_result.returncode == 0:
+                console.print(
+                    "✅ [green]ISO mounted successfully with fallback options[/green]"
+                )
+                return True
+            else:
+                console.print(
+                    f"❌ [red]Fallback mount also failed:[/red] {fallback_result.stderr}"
+                )
+                console.print(
+                    "💡 [yellow]Try running as root or check if the file is a valid ISO[/yellow]"
+                )
+                return False
+
     except Exception as e:
-        console.print(
-            f"⚠️  [yellow]Warning: Could not validate benchmarks: {e}[/yellow]"
-        )
-
-    # Test 3: Check for example config files
-    config_dir = install_dir / "config"
-    if config_dir.exists():
-        example_configs = list(config_dir.glob("Example-*.cfg"))
-        if example_configs:
-            console.print(f"✅ Found {len(example_configs)} example config files")
-        else:
-            console.print("⚠️  [yellow]Warning: No example config files found[/yellow]")
-
-    console.print("✅ Installation validation complete")
+        console.print(f"❌ [red]Error mounting ISO: {e}[/red]")
+        return False
 
 
-def _install_cleanup(
-    mount_point: Path,
-    verbose: bool,
-    console: Console,
-) -> None:
-    """Clean up temporary files and unmount the ISO."""
-    console.print("🧹 [bold blue]Cleaning up...[/bold blue]")
-
+def _install_unmount_iso(mount_point: Path, console: Console) -> bool:
+    """Unmount the ISO file."""
     try:
-        # Unmount the ISO
-        umount_cmd = ["sudo", "umount", str(mount_point)]
+        unmount_cmd = ["sudo", "umount", str(mount_point)]
 
-        if verbose:
-            console.print(f"Executing: [cyan]{' '.join(umount_cmd)}[/cyan]")
+        console.print(f"🔧 [blue]Unmounting:[/blue] [cyan]{mount_point}[/cyan]")
 
-        subprocess.run(umount_cmd, check=True, capture_output=True)
-        console.print(f"✅ Unmounted ISO from [cyan]{mount_point}[/cyan]")
+        result = subprocess.run(unmount_cmd, capture_output=True, text=True)
 
-        # Remove temporary mount point if we created it
-        if mount_point.name.startswith("spec_mount_"):
-            mount_point.rmdir()
-            console.print("✅ Removed temporary mount point")
+        if result.returncode == 0:
+            console.print("✅ [green]ISO unmounted successfully[/green]")
+            return True
+        else:
+            console.print(f"⚠️  [yellow]Unmount warning:[/yellow] {result.stderr}")
+            # Don't fail the installation for unmount issues
+            return True
 
-    except subprocess.SubprocessError as e:
-        console.print(f"⚠️  [yellow]Warning: Could not unmount ISO: {e}[/yellow]")
+    except Exception as e:
+        console.print(f"⚠️  [yellow]Error unmounting ISO: {e}[/yellow]")
+        return True
+
+
+def _validate_spec_iso_content(mount_point: Path, console: Console) -> bool:
+    """Validate that the mounted ISO contains SPEC CPU 2017."""
+    console.print("🔍 [blue]Validating SPEC CPU 2017 content...[/blue]")
+
+    # Check for key SPEC files/directories
+    spec_indicators = [
+        "install.sh",
+        "MANIFEST",
+        "redistributable_sources",
+        "tools",
+        "benchspec",
+    ]
+
+    found_indicators = []
+    for indicator in spec_indicators:
+        if (mount_point / indicator).exists():
+            found_indicators.append(indicator)
+
+    console.print(
+        f"📋 [blue]Found SPEC indicators:[/blue] [cyan]{len(found_indicators)}/{len(spec_indicators)}[/cyan]"
+    )
+
+    if len(found_indicators) >= 3:
+        console.print("✅ [green]ISO appears to contain SPEC CPU 2017[/green]")
+        return True
+    else:
+        console.print("❌ [red]ISO does not appear to contain SPEC CPU 2017[/red]")
         console.print(
-            f"You may need to manually unmount: [cyan]sudo umount {mount_point}[/cyan]"
+            f"💡 [yellow]Missing indicators: {set(spec_indicators) - set(found_indicators)}[/yellow]"
         )
-    except OSError as e:
-        console.print(f"⚠️  [yellow]Warning: Could not remove mount point: {e}[/yellow]")
+        return False
+
+
+def _show_license_agreement(mount_point: Path, console: Console) -> bool:
+    """Show SPEC license agreement and get user confirmation."""
+    license_files = ["COPYING", "LICENSE", "EULA"]
+
+    license_content = None
+    for license_file in license_files:
+        license_path = mount_point / license_file
+        if license_path.exists():
+            try:
+                license_content = license_path.read_text()[:2000]  # First 2000 chars
+                break
+            except Exception:
+                continue
+
+    console.print()
+    console.print("📜 [bold yellow]SPEC CPU 2017 License Agreement[/bold yellow]")
+    console.print()
+
+    if license_content:
+        console.print(license_content)
+        console.print("\n[dim]... (truncated)[/dim]")
+    else:
+        console.print("⚠️  [yellow]License file not found in ISO[/yellow]")
+        console.print("Please ensure you have proper licensing for SPEC CPU 2017")
+
+    console.print()
+    console.print(
+        "⚠️  [yellow]By proceeding, you agree to the SPEC CPU 2017 license terms[/yellow]"
+    )
+
+    return bool(typer.confirm("Do you accept the license agreement?"))
+
+
+def _install_copy_files(mount_point: Path, install_dir: Path, console: Console) -> bool:
+    """Copy files from mounted ISO to installation directory."""
+    console.print(f"📂 [blue]Copying files to:[/blue] [cyan]{install_dir}[/cyan]")
+
+    # Create installation directory
+    install_dir.mkdir(parents=True, exist_ok=True)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Copying SPEC CPU 2017 files...", total=None)
+
+        try:
+            # Use rsync if available for better progress, otherwise use cp
+            try:
+                copy_cmd = [
+                    "sudo",
+                    "rsync",
+                    "-av",
+                    "--progress",
+                    f"{mount_point}/",
+                    str(install_dir),
+                ]
+                result = subprocess.run(copy_cmd, capture_output=True, text=True)
+            except FileNotFoundError:
+                # Fallback to cp if rsync is not available
+                copy_cmd = ["sudo", "cp", "-r", f"{mount_point}/.", str(install_dir)]
+                result = subprocess.run(copy_cmd, capture_output=True, text=True)
+
+            progress.update(task, completed=True)
+
+            if result.returncode == 0:
+                console.print("✅ [green]Files copied successfully[/green]")
+                return True
+            else:
+                console.print(f"❌ [red]Copy failed:[/red] {result.stderr}")
+                return False
+
+        except Exception as e:
+            progress.update(task, completed=True)
+            console.print(f"❌ [red]Error copying files: {e}[/red]")
+            return False
+
+
+def _install_setup_environment(install_dir: Path, console: Console) -> None:
+    """Set up SPEC environment files."""
+    console.print("🔧 [blue]Setting up environment...[/blue]")
+
+    # Make scripts executable
+    bin_dir = install_dir / "bin"
+    if bin_dir.exists():
+        try:
+            subprocess.run(["sudo", "chmod", "+x", "-R", str(bin_dir)], check=True)
+            console.print("✅ [green]Made bin scripts executable[/green]")
+        except subprocess.CalledProcessError:
+            console.print("⚠️  [yellow]Could not make bin scripts executable[/yellow]")
+
+    # Set ownership to current user if possible
+    import os
+
+    current_user = os.getenv("USER")
+    if current_user:
+        try:
+            subprocess.run(
+                [
+                    "sudo",
+                    "chown",
+                    "-R",
+                    f"{current_user}:{current_user}",
+                    str(install_dir),
+                ],
+                check=True,
+            )
+            console.print(f"✅ [green]Changed ownership to {current_user}[/green]")
+        except subprocess.CalledProcessError:
+            console.print("⚠️  [yellow]Could not change ownership[/yellow]")

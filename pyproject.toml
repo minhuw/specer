@@ -10,8 +10,9 @@ dependencies = [
     "rich>=13.0.0",
     "loguru>=0.7.3",
 ]
+
 readme = "README.md"
-requires-python = ">= 3.9"
+requires-python = ">= 3.10"
 license = { text = "MIT" }
 keywords = ["python"]
 classifiers = [
@@ -19,7 +20,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -51,6 +51,7 @@ dev-dependencies = [
     "bandit[toml]>=1.7.5",
     "safety>=3.6.0",
     "virtualenv>=20.33.1",
+    "twine>=5.1.0",
 ]
 
 [tool.hatch.metadata]
@@ -61,7 +62,7 @@ packages = ["src/specer"]
 
 # Tool configurations
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 88
 
 [tool.ruff.lint]
@@ -107,7 +108,7 @@ line-ending = "auto"
 
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true

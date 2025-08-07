@@ -2,12 +2,12 @@
 
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
 
 
-def parse_result_files(output: str) -> Optional[dict[str, Any]]:
+def parse_result_files(output: str) -> dict[str, Any] | None:
     """Parse runcpu output to find result files and extract scores.
 
     Args:
@@ -85,7 +85,7 @@ def parse_result_files(output: str) -> Optional[dict[str, Any]]:
     )
 
 
-def read_result_file(file_path: str, spec_root: Path) -> Optional[dict[str, Any]]:
+def read_result_file(file_path: str, spec_root: Path) -> dict[str, Any] | None:
     """Read and parse a SPEC result file to extract scores.
 
     Args:

@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -33,7 +33,7 @@ def compile_command(
         ),
     ],
     spec_root: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--spec-root",
             "-s",
@@ -41,7 +41,7 @@ def compile_command(
         ),
     ] = None,
     tune: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--tune",
             "-t",
@@ -72,7 +72,7 @@ def compile_command(
         ),
     ] = False,
     parallel_test: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--parallel-test",
             help="Number of parallel test processes",
@@ -100,28 +100,28 @@ def compile_command(
         ),
     ] = False,
     _cores: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--cores",
             help="Number of CPU cores to use for compilation (parallel build processes)",
         ),
     ] = None,
     numa_node: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--numa-node",
             help="Bind compilation processes to specific NUMA node (also binds memory allocation)",
         ),
     ] = None,
     cpu_cores: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--cpu-cores",
             help="Bind compilation processes to specific CPU cores (e.g., '0-3', '0,2,4', '0-3,8-11')",
         ),
     ] = None,
     numa_memory: Annotated[
-        Optional[bool],
+        bool | None,
         typer.Option(
             "--numa-memory/--no-numa-memory",
             help="Whether to bind memory allocation to the same NUMA node as CPU (default: True when --numa-node is specified)",

@@ -1,7 +1,7 @@
 """Setup command for SPEC CPU 2017 benchmarks."""
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -30,7 +30,7 @@ def setup_command(
         ),
     ],
     tune: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--tune",
             "-t",
@@ -38,7 +38,7 @@ def setup_command(
         ),
     ] = "base",
     spec_root: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--spec-root",
             "-s",

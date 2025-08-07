@@ -1,7 +1,7 @@
 """Update command for SPEC CPU 2017 installation."""
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -14,7 +14,7 @@ from specer.utils import (
 
 def update_command(
     spec_root: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--spec-root",
             "-s",

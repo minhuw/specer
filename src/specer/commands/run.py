@@ -4,7 +4,7 @@ import contextlib
 import re
 import time
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -33,7 +33,7 @@ def run_command(
         ),
     ],
     config: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--config",
             "-c",
@@ -41,7 +41,7 @@ def run_command(
         ),
     ] = None,
     tune: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--tune",
             "-t",
@@ -49,7 +49,7 @@ def run_command(
         ),
     ] = "base",
     size: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--size",
             "-i",
@@ -57,28 +57,28 @@ def run_command(
         ),
     ] = "ref",
     copies: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--copies",
             help="Number of copies for rate benchmarks",
         ),
     ] = None,
     threads: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--threads",
             help="Number of threads for speed benchmarks",
         ),
     ] = None,
     iterations: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--iterations",
             help="Number of iterations (2 or 3 for reportable runs)",
         ),
     ] = None,
     spec_root: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--spec-root",
             "-s",
@@ -123,7 +123,7 @@ def run_command(
         ),
     ] = False,
     parallel_test: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--parallel-test",
             help="Number of parallel test processes",
@@ -151,7 +151,7 @@ def run_command(
         ),
     ] = False,
     cores: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--cores",
             help="Number of CPU cores to use (for SPECrate: copies, for SPECspeed: threads)",
@@ -180,35 +180,35 @@ def run_command(
         ),
     ] = False,
     json_output: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--json",
             help="Save results to JSON file (auto-named if no path provided)",
         ),
     ] = None,
     output_formats: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--output-formats",
             help="SPEC output formats (default: 'rsf,pdf' for speed). Use 'all' for full compatibility with legacy tools.",
         ),
     ] = None,
     numa_node: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--numa-node",
             help="Bind benchmark processes to specific NUMA node (also binds memory allocation)",
         ),
     ] = None,
     cpu_cores: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--cpu-cores",
             help="Bind benchmark processes to specific CPU cores (e.g., '0-3', '0,2,4', '0-3,8-11')",
         ),
     ] = None,
     numa_memory: Annotated[
-        Optional[bool],
+        bool | None,
         typer.Option(
             "--numa-memory/--no-numa-memory",
             help="Whether to bind memory allocation to the same NUMA node as CPU (default: True when --numa-node is specified)",
@@ -253,6 +253,26 @@ def run_command(
     if speed and rate:
         typer.echo("Error: --speed and --rate options are mutually exclusive", err=True)
         raise typer.Exit(1)
+
+    # Validate reportable mode requirements
+    if reportable:
+        # SPEC reportable runs require full benchmark suites, not individual benchmarks
+        valid_suites = {"intspeed", "intrate", "fpspeed", "fprate", "all"}
+        if not any(bench.lower() in valid_suites for bench in benchmarks):
+            typer.echo("Error: --reportable requires a full benchmark suite", err=True)
+            typer.echo("", err=True)
+            typer.echo("Valid suites for reportable runs:", err=True)
+            typer.echo("  intspeed   - Integer speed benchmarks", err=True)
+            typer.echo("  intrate    - Integer rate benchmarks", err=True)
+            typer.echo("  fpspeed    - Floating-point speed benchmarks", err=True)
+            typer.echo("  fprate     - Floating-point rate benchmarks", err=True)
+            typer.echo("  all        - All benchmark suites", err=True)
+            typer.echo("", err=True)
+            typer.echo(
+                "For individual benchmarks, use --noreportable instead:", err=True
+            )
+            typer.echo(f"  specer run {' '.join(benchmarks)} --noreportable", err=True)
+            raise typer.Exit(1)
 
     # Validate NUMA/CPU affinity options
     if numa_node is not None or cpu_cores is not None:
