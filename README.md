@@ -4,8 +4,20 @@ A CLI wrapper for SPEC CPU 2017 benchmark suite.
 
 ## Installation
 
+### From PyPI
 ```bash
 pip install specer
+```
+
+### For Development
+```bash
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone and install
+git clone https://github.com/minhuw/specer
+cd specer
+uv sync
 ```
 
 ## Usage
