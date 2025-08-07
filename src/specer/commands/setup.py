@@ -133,6 +133,19 @@ def setup_command(
                     )
                 else:
                     typer.echo(f"Auto-generated config file: {generated_config_path}")
+
+            # Show config content if verbose mode is enabled
+            if verbose:
+                typer.echo("\n" + "=" * 60)
+                typer.echo("AUTO-GENERATED CONFIG FILE CONTENT:")
+                typer.echo("=" * 60)
+                try:
+                    config_content = Path(generated_config_path).read_text()
+                    typer.echo(config_content)
+                    typer.echo("=" * 60)
+                except Exception as e:
+                    typer.echo(f"Error reading config file: {e}", err=True)
+                typer.echo()
         else:
             typer.echo(
                 "Error: Could not auto-generate config file from template", err=True
