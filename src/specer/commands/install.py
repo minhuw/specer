@@ -148,8 +148,11 @@ def install_command(
             console.print(
                 "   2. Source environment: [cyan]source $SPEC_ROOT/shrc[/cyan]"
             )
-            console.print("   3. Run setup: [cyan]specer setup[/cyan]")
-            console.print("   4. Test installation: [cyan]runcpu --help[/cyan]")
+            console.print(
+                f"   3. Update to latest: [cyan]specer update --spec-root {install_dir}[/cyan]"
+            )
+            console.print("   4. Run setup: [cyan]specer setup[/cyan]")
+            console.print("   5. Test installation: [cyan]runcpu --help[/cyan]")
 
         finally:
             # Unmount the ISO
