@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from specer.logging import logger
 from specer.result_parser import read_result_file
 from specer.sync import create_evalsync_worker
 from specer.utils import (
@@ -336,9 +337,17 @@ def run_command(
     # Always auto-generate config if no config is provided
     if config is None:
         # Automatically generate config from template
+        logger.debug("🐛 Generating config from template")
+
         generated_config_path = generate_config_from_template(
             cores, effective_spec_root, tune
         )
+
+        if generated_config_path:
+            logger.debug(f"🐛 Config generated: {generated_config_path}")
+        else:
+            logger.warning("⚠️  Failed to generate config file from template")
+
         if generated_config_path:
             effective_config = generated_config_path
             if dry_run:
@@ -368,9 +377,11 @@ def run_command(
     else:
         prefer_speed, prefer_rate = speed, rate
 
+    logger.debug(f"🐛 Converting benchmarks: {benchmarks}")
     converted_benchmarks = convert_benchmark_names(
         benchmarks, prefer_speed, prefer_rate
     )
+    logger.debug(f"🐛 Converted benchmarks: {converted_benchmarks}")
 
     if dry_run and converted_benchmarks != benchmarks:
         typer.echo(f"Converted benchmark names: {benchmarks} -> {converted_benchmarks}")
@@ -420,6 +431,8 @@ def run_command(
 
     # Build the runcpu command
     # (spec_root was already resolved earlier for config generation)
+    logger.debug("🐛 Building runcpu command")
+
     cmd = build_runcpu_command(
         action="run",
         benchmarks=converted_benchmarks,
@@ -438,6 +451,8 @@ def run_command(
         noreportable=noreportable,
         output_formats=output_formats,
     )
+
+    logger.debug(f"🐛 Built runcpu command: {' '.join(cmd)}")
 
     if dry_run:
         # Show what the final command would look like with affinity
@@ -477,10 +492,13 @@ def run_command(
     try:
         # Send ready signal - tasks are compiled and ready to run
         if evalsync_worker:
+            logger.debug("🐛 Sending ready signal to EvalSync")
             evalsync_worker.ready()
+            logger.debug("🐛 Waiting for start signal from EvalSync")
             evalsync_worker.wait_for_start()
 
         # Execute the command with optional result parsing and time tracking
+        logger.debug("🐛 Executing runcpu command")
         start_time = time.time()
         result_info = execute_runcpu(
             cmd,
@@ -495,6 +513,7 @@ def run_command(
         )
         end_time = time.time()
         total_elapsed = end_time - start_time
+        logger.debug(f"🐛 Execution completed in {total_elapsed:.2f}s")
 
         # Wait for stop signal after benchmark execution completes
         if evalsync_worker:

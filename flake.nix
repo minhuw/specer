@@ -74,44 +74,16 @@ EOF
         # Build the package
         packages.default = specerPackage;
 
-        # Development shell
         devShells.default = pkgs.mkShell {
-          buildInputs = [
-            # Python environment with dependencies
-            devPythonEnv
-
-            # Build tools
-            pkgs.python3Packages.hatchling
-
-            # Development tools
-            pkgs.python3Packages.pytest
-            pkgs.python3Packages.pytest-cov
-            pkgs.python3Packages.pytest-xdist
-            pkgs.python3Packages.ruff
-            pkgs.python3Packages.mypy
-            pkgs.pre-commit
-            pkgs.python3Packages.bandit
-            pkgs.python3Packages.safety
-            pkgs.python3Packages.virtualenv
-            pkgs.python3Packages.twine
-
-            # System dependencies that SPEC CPU 2017 might need
-            pkgs.gcc
-            pkgs.gnumake
-            pkgs.which
-            pkgs.procps
-
-            # For development
-            pkgs.git
-            pkgs.curl
-            pkgs.uv  # Since the project uses uv
-          ];
 
           shellHook = ''
             echo "🚀 Specer Development Environment"
             echo "Python: $(python3 --version)"
             echo "Available commands: specer"
             echo ""
+
+            # Prioritize system compilers over nix compilers
+            export PATH="/usr/bin:$PATH"
 
             # Set up environment variables
             export PYTHONPATH="$PWD/src:$PYTHONPATH"
@@ -132,25 +104,15 @@ EOF
             export SPEC_ROOT="''${SPEC_PATH:-$HOME/spec2017}"
             echo "Using SPEC_ROOT: $SPEC_ROOT"
 
-            # Install evalsync and other dependencies
-            echo "Installing evalsync..."
-            python3 -m pip install --user evalsync>=0.3.1
+            # Install dependencies using uv sync
+            echo "Installing dependencies with uv sync..."
+            uv sync
 
-            # Create virtual environment if it doesn't exist
-            if [ ! -d .venv ]; then
-              echo "Creating virtual environment..."
-              python3 -m venv .venv
-              source .venv/bin/activate
-              pip install -e .
-            else
-              source .venv/bin/activate
-            fi
-
-            echo "Virtual environment activated: $VIRTUAL_ENV"
+            # Verify compiler availability
+            echo "Checking compiler availability:"
+            echo "  GCC: $(which gcc 2>/dev/null || echo 'NOT FOUND') (prioritizing system)"
+            echo "  GFortran: $(which gfortran 2>/dev/null || echo 'NOT FOUND') (prioritizing system)"
             echo ""
-            echo "To build the package: nix build"
-            echo "To run specer: nix run"
-            echo "To enter dev shell: nix develop"
           '';
         };
 

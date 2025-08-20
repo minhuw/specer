@@ -1,6 +1,7 @@
 """Shared utility functions for specer CLI."""
 
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -13,6 +14,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
+
+from specer.logging import logger
 
 # Mapping of simple benchmark names to their SPEC CPU 2017 identifiers
 # Format: "simple_name": ("speed_version", "rate_version")
@@ -164,83 +167,92 @@ def detect_gcc_version() -> int | None:
     Returns:
         The major version number of GCC, or None if detection fails
     """
-    try:
-        import subprocess
+    # First check if gcc is available
+    which_result = subprocess.run(
+        ["which", "gcc"], capture_output=True, text=True, timeout=5
+    )
 
-        # First check if gcc is available
-        which_result = subprocess.run(
-            ["which", "gcc"], capture_output=True, text=True, timeout=5
-        )
-
-        if which_result.returncode != 0:
-            return None
-
-        # Get GCC version
-        version_result = subprocess.run(
-            ["gcc", "--version"], capture_output=True, text=True, timeout=5
-        )
-
-        if version_result.returncode != 0:
-            return None
-
-        # Parse version from output like "gcc (GCC) 11.2.0"
-        # or "gcc (Ubuntu 9.4.0-1ubuntu1~20.04.1) 9.4.0"
-        version_output = version_result.stdout.strip()
-
-        # Look for patterns like "gcc (...) X.Y.Z" or "gcc (GCC) X.Y.Z"
-        import re
-
-        match = re.search(r"gcc.*?(\d+)\.(\d+)\.(\d+)", version_output, re.IGNORECASE)
-        if match:
-            major_version = int(match.group(1))
-            return major_version
-
+    if which_result.returncode != 0:
         return None
 
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.SubprocessError,
-        ValueError,
-        AttributeError,
-    ):
+    # Get GCC version
+    version_result = subprocess.run(
+        ["gcc", "--version"], capture_output=True, text=True, timeout=5
+    )
+
+    if version_result.returncode != 0:
         return None
+
+    # Parse version from output like "gcc (GCC) 11.2.0"
+    # or "gcc (Ubuntu 9.4.0-1ubuntu1~20.04.1) 9.4.0"
+    version_output = version_result.stdout.strip()
+
+    # Look for patterns like "gcc (...) X.Y.Z" or "gcc (GCC) X.Y.Z"
+    match = re.search(r"gcc.*?(\d+)\.(\d+)\.(\d+)", version_output, re.IGNORECASE)
+    if match:
+        major_version = int(match.group(1))
+        return major_version
+
+    return None
 
 
 def detect_gcc_path() -> str | None:
     """Detect the GCC installation path using 'which gcc'.
 
+    This function finds the GCC installation directory through a 4-step process:
+
+    1. **Step 1**: Run 'which gcc' to find the location of the gcc binary
+       - This uses the system's PATH to locate the gcc executable
+       - Returns the full path to the gcc binary (e.g., /usr/bin/gcc)
+
+    2. **Step 2**: Extract the binary path from the 'which' output
+       - Strips whitespace and validates the path exists
+       - Example: /nix/store/.../bin/gcc
+
+    3. **Step 3**: Calculate the installation directory
+       - Takes the parent directory (removes 'gcc'): /path/bin/
+       - Takes the parent directory again (removes 'bin'): /path/
+       - This gives us the root of the GCC installation
+
+    4. **Step 4**: Return the final installation path
+       - This path contains bin/, lib/, include/, etc. subdirectories
+       - SPEC CPU uses this path to locate GCC libraries and headers
+
+    Examples:
+        /usr/bin/gcc -> /usr
+        /opt/gcc-11.2.0/bin/gcc -> /opt/gcc-11.2.0
+        /nix/store/...-gcc-wrapper/bin/gcc -> /nix/store/...-gcc-wrapper
+
     Returns:
         The parent directory of the GCC binary (without /bin), or None if detection fails
     """
-    try:
-        import subprocess
+    # First check if gcc is available
+    which_result = subprocess.run(
+        ["which", "gcc"], capture_output=True, text=True, timeout=5
+    )
 
-        # First check if gcc is available
-        which_result = subprocess.run(
-            ["which", "gcc"], capture_output=True, text=True, timeout=5
-        )
-
-        if which_result.returncode != 0:
-            return None
-
-        gcc_path = which_result.stdout.strip()
-        if not gcc_path:
-            return None
-
-        # Get the parent directory (remove /bin/gcc -> /bin -> parent)
-        # For /usr/bin/gcc -> /usr
-        # For /opt/rh/devtoolset-9/root/usr/bin/gcc -> /opt/rh/devtoolset-9/root/usr
-        bin_dir = Path(gcc_path).parent
-        gcc_dir = bin_dir.parent
-
-        return str(gcc_dir)
-
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.SubprocessError,
-        OSError,
-    ):
+    if which_result.returncode != 0:
+        logger.debug("🐛 GCC not found in PATH")
         return None
+
+    gcc_path = which_result.stdout.strip()
+    if not gcc_path:
+        logger.debug("🐛 'which gcc' returned empty result")
+        return None
+
+    logger.debug(f"🐛 Found GCC binary at: {gcc_path}")
+
+    # Get the parent directory (remove /bin/gcc -> /bin -> parent)
+    # For /usr/bin/gcc -> /usr
+    # For /opt/rh/devtoolset-9/root/usr/bin/gcc -> /opt/rh/devtoolset-9/root/usr
+    bin_dir = Path(gcc_path).parent
+    gcc_dir = bin_dir.parent
+
+    detected_path = str(gcc_dir)
+
+    logger.debug(f"🐛 GCC installation path: {detected_path}")
+
+    return detected_path
 
 
 def generate_config_from_template(
@@ -266,8 +278,6 @@ def generate_config_from_template(
         if spec_root:
             spec_path = str(spec_root)
         else:
-            import os
-
             spec_path_env = os.environ.get("SPEC_PATH")
             if not spec_path_env:
                 return None
@@ -289,22 +299,25 @@ def generate_config_from_template(
         )
 
         # Auto-detect GCC version and uncomment GCCge10 if needed
+
         gcc_version = detect_gcc_version()
         if gcc_version and gcc_version >= 10:
             # Uncomment the GCCge10 define for GCC 10+
-            template_content = template_content.replace(
-                "#%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later",
-                "%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later (auto-detected)",
-            )
+            old_line = "#%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later"
+            new_line = "%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later (auto-detected)"
+            template_content = template_content.replace(old_line, new_line)
 
         # Auto-detect GCC path and update gcc_dir
         gcc_path = detect_gcc_path()
         if gcc_path:
-            # Update the gcc_dir define with detected path
-            template_content = template_content.replace(
-                '%   define  gcc_dir        "/opt/rh/devtoolset-9/root/usr"  # EDIT (see above)',
-                f'%   define  gcc_dir        "{gcc_path}"  # EDIT (see above) (auto-detected)',
-            )
+            logger.debug(f"🐛 Detected GCC path: {gcc_path}")
+            # Replace the gcc_dir define (this handles both the main and conditional cases)
+            old_line = '%   define  gcc_dir        "/opt/rh/devtoolset-9/root/usr"  # EDIT (see above)'
+            new_line = f'%   define  gcc_dir        "{gcc_path}"  # EDIT (see above) (auto-detected)'
+            template_content = template_content.replace(old_line, new_line, 1)
+            logger.debug("🐛 Updated GCC directory in config template")
+        else:
+            logger.warning("⚠️  Could not detect GCC path, using default in template")
 
         # Update tune setting based on CLI parameter
         if tune is not None:
@@ -326,8 +339,6 @@ def generate_config_from_template(
             )
         else:
             # Default to a reasonable number if not specified
-            import os
-
             default_cores = os.cpu_count() or 4
             template_content = template_content.replace(
                 "   copies           = 1   # EDIT to change number of copies (see above)",
@@ -456,49 +467,43 @@ def validate_numa_topology() -> dict[str, Any] | None:
     Returns:
         Dictionary with NUMA topology information, or None if NUMA not available
     """
-    try:
-        import subprocess
+    # Try to get NUMA topology using numactl --hardware
+    result = subprocess.run(
+        ["numactl", "--hardware"], capture_output=True, text=True, timeout=10
+    )
 
-        # Try to get NUMA topology using numactl --hardware
-        result = subprocess.run(
-            ["numactl", "--hardware"], capture_output=True, text=True, timeout=10
-        )
-
-        if result.returncode != 0:
-            return None
-
-        topology: dict[str, Any] = {"nodes": [], "node_cpus": {}, "total_cpus": 0}
-        nodes_list: list[int] = topology["nodes"]
-        node_cpus_dict: dict[int, list[int]] = topology["node_cpus"]
-
-        lines = result.stdout.strip().split("\n")
-
-        for line in lines:
-            line = line.strip()
-            if line.startswith("node ") and " cpus:" in line:
-                # Parse line like "node 0 cpus: 0 1 2 3 4 5"
-                parts = line.split()
-                if len(parts) >= 3 and parts[1].isdigit():
-                    node_id = int(parts[1])
-                    nodes_list.append(node_id)
-                    cpu_list: list[int] = []
-                    # Extract CPU numbers after "cpus:"
-                    cpus_start = False
-                    for part in parts:
-                        if cpus_start and part.isdigit():
-                            cpu_list.append(int(part))
-                        elif part == "cpus:":
-                            cpus_start = True
-                    node_cpus_dict[node_id] = cpu_list
-                    if cpu_list:
-                        topology["total_cpus"] = max(
-                            topology["total_cpus"], max(cpu_list) + 1
-                        )
-
-        return topology if nodes_list else None
-
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+    if result.returncode != 0:
         return None
+
+    topology: dict[str, Any] = {"nodes": [], "node_cpus": {}, "total_cpus": 0}
+    nodes_list: list[int] = topology["nodes"]
+    node_cpus_dict: dict[int, list[int]] = topology["node_cpus"]
+
+    lines = result.stdout.strip().split("\n")
+
+    for line in lines:
+        line = line.strip()
+        if line.startswith("node ") and " cpus:" in line:
+            # Parse line like "node 0 cpus: 0 1 2 3 4 5"
+            parts = line.split()
+            if len(parts) >= 3 and parts[1].isdigit():
+                node_id = int(parts[1])
+                nodes_list.append(node_id)
+                cpu_list: list[int] = []
+                # Extract CPU numbers after "cpus:"
+                cpus_start = False
+                for part in parts:
+                    if cpus_start and part.isdigit():
+                        cpu_list.append(int(part))
+                    elif part == "cpus:":
+                        cpus_start = True
+                node_cpus_dict[node_id] = cpu_list
+                if cpu_list:
+                    topology["total_cpus"] = max(
+                        topology["total_cpus"], max(cpu_list) + 1
+                    )
+
+    return topology if nodes_list else None
 
 
 def build_affinity_command(
@@ -619,22 +624,25 @@ def execute_runcpu(
     final_cmd = build_affinity_command(cmd, numa_node, cpu_cores, numa_memory)
 
     if verbose:
-        typer.echo(f"Executing: {' '.join(final_cmd)}")
+        logger.info(f"ℹ️  Executing: [bold]{' '.join(final_cmd)}[/bold]")
         if final_cmd != cmd:
-            typer.echo(
-                f"Applied affinity binding: {' '.join(final_cmd[: final_cmd.index('--') if '--' in final_cmd else len(final_cmd) - len(cmd)])}"
+            affinity_part = final_cmd[
+                : final_cmd.index("--")
+                if "--" in final_cmd
+                else len(final_cmd) - len(cmd)
+            ]
+            logger.info(
+                f"ℹ️  Applied affinity binding: [bold]{' '.join(affinity_part)}[/bold]"
             )
 
     try:
         if parse_results or hide_logs:
             # Capture output for parsing or when hiding logs
             if hide_logs and show_progress:
-                console = Console()
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     TimeElapsedColumn(),
-                    console=console,
                     transient=True,
                 ) as progress:
                     task = progress.add_task(
@@ -713,7 +721,7 @@ def execute_runcpu(
             output = ""
 
         if result.returncode != 0:
-            typer.echo(f"Command failed with exit code {result.returncode}", err=True)
+            logger.error(f"❌ Command failed with exit code {result.returncode}")
             raise typer.Exit(result.returncode)
 
         # Parse results if requested and we have output to parse
@@ -727,15 +735,14 @@ def execute_runcpu(
         return None
 
     except FileNotFoundError as err:
-        typer.echo(
-            "Error: 'runcpu' command not found. Please ensure SPEC CPU 2017 is installed "
+        logger.error(
+            "❌ 'runcpu' command not found. Please ensure SPEC CPU 2017 is installed "
             "and the 'runcpu' command is in your PATH, or use --spec-root to specify "
-            "the SPEC installation directory.",
-            err=True,
+            "the SPEC installation directory."
         )
         raise typer.Exit(1) from err
     except KeyboardInterrupt as err:
-        typer.echo("\nOperation cancelled by user.", err=True)
+        logger.warning("⚠️  Operation cancelled by user")
         raise typer.Exit(130) from err
 
 
@@ -748,7 +755,7 @@ def display_results_with_rich(
 
     Args:
         result_info: Parsed result information
-        console: Rich console instance (creates new one if None)
+        console: Rich console instance (uses specer console if None)
         show_timing: Whether to display execution timing information
     """
     if console is None:

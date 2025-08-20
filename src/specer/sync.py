@@ -2,22 +2,11 @@
 
 import os
 import socket
-from typing import TYPE_CHECKING
 
+from evalsync import ExperimentWorker
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
-
-if TYPE_CHECKING:
-    from evalsync import ExperimentWorker
-
-try:
-    from evalsync import ExperimentWorker
-
-    EVALSYNC_AVAILABLE = True
-except ImportError:
-    EVALSYNC_AVAILABLE = False
-    ExperimentWorker = None
 
 console = Console()
 
@@ -35,10 +24,6 @@ class SpecerEvalSyncWorker:
             ImportError: If evalsync is not available
             ValueError: If required environment variables are not set
         """
-        if not EVALSYNC_AVAILABLE:
-            raise ImportError(
-                "evalsync is not available. Please install it with: pip install evalsync"
-            )
 
         # Always read from environment variables
         self.experiment_id = os.environ.get("EVALSYNC_EXPERIMENT_ID")
@@ -63,8 +48,6 @@ class SpecerEvalSyncWorker:
 
     def initialize(self) -> None:
         """Initialize the EvalSync worker connection."""
-        if not EVALSYNC_AVAILABLE:
-            return
 
         try:
             self.worker = ExperimentWorker(
@@ -148,11 +131,6 @@ class SpecerEvalSyncWorker:
             logger.warning(f"Failed to cleanup EvalSync worker: {e}")
 
 
-def is_evalsync_available() -> bool:
-    """Check if evalsync is available for import."""
-    return EVALSYNC_AVAILABLE
-
-
 def create_evalsync_worker(
     verbose: bool = False,
 ) -> SpecerEvalSyncWorker | None:
@@ -166,8 +144,6 @@ def create_evalsync_worker(
     Returns:
         SpecerEvalSyncWorker instance if evalsync is available and environment variables are set, None otherwise
     """
-    if not EVALSYNC_AVAILABLE:
-        return None
 
     try:
         worker = SpecerEvalSyncWorker(verbose)

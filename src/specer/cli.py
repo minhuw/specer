@@ -13,6 +13,7 @@ from specer.commands import (
     topology_command,
     update_command,
 )
+from specer.logging import setup_logging
 
 app = typer.Typer(
     name="specer",
@@ -41,13 +42,35 @@ def main(
             help="Show version and exit",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose output and detailed logging",
+        ),
+    ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            "-q",
+            help="Suppress non-essential output",
+        ),
+    ] = False,
 ) -> None:
     """A CLI wrapper for SPEC CPU 2017 benchmark suite.
 
     You can set the SPEC CPU 2017 installation directory using the --spec-root option
     on individual commands or by setting the SPEC_ROOT environment variable.
+
+    Logging Options:
+    - Use --verbose for detailed output and debugging information
+    - Use --quiet to suppress non-essential messages
+    - Specer messages are clearly distinguished from SPEC CPU output
     """
-    pass
+    # Set up unified logging system
+    setup_logging(verbose=verbose, quiet=quiet)
 
 
 # Register commands
