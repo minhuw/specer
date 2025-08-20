@@ -14,7 +14,7 @@
 
         # For now, let's create a simpler package that uses the existing dependencies
         # and handles evalsync in the development environment
-        specerPackage = pkgs.python3Packages.buildPythonPackage rec {
+        makeSpecerPackage = {}: pkgs.python3Packages.buildPythonPackage rec {
           pname = "specer";
           version = "0.1.0";
           src = ./.;
@@ -72,7 +72,9 @@ EOF
       in
       {
         # Build the package
-        packages.default = specerPackage;
+        packages = {
+          default = makeSpecerPackage {};
+        };
 
         devShells.default = pkgs.mkShell {
 
@@ -122,8 +124,12 @@ EOF
           program = "${self.packages.${system}.default}/bin/specer";
         };
 
+        lib.make = makeSpecerPackage;
+
         # Formatter
         formatter = pkgs.nixpkgs-fmt;
       }
-    );
+    ) // {
+      flake = "github:minhuw/specer";
+    };
 }
