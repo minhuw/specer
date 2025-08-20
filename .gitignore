@@ -149,6 +149,7 @@ venv.bak/
 .direnv/
 result
 result-*
+.dream2nix/
 
 # Spyder project settings
 .spyderproject
