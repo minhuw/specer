@@ -1,0 +1,48 @@
+[project]
+# Project metadata
+name = "specer"
+version = "0.1.0"
+description = "A CLI wrapper for SPEC CPU 2017 benchmark suite"
+
+[build-system]
+# Use hatchling build system
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[python]
+# Python version requirements
+version = ">=3.10"
+
+# Runtime dependencies
+[dependencies]
+runtime = [
+    "typer[all]>=0.9.0",
+    "rich>=13.0.0",
+    "loguru>=0.7.3",
+    "evalsync>=0.3.1"
+]
+
+# Development dependencies
+dev = [
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+    "pytest-xdist>=3.3.1",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=4.2.0",
+    "bandit[toml]>=1.7.5",
+    "safety>=3.6.0",
+    "virtualenv>=20.33.1",
+    "twine>=5.1.0"
+]
+
+[package]
+# Package configuration
+source-root = "src"
+packages = ["specer"]
+
+[entry-points]
+# Console scripts
+console-scripts = [
+    "specer = specer.cli:cli_main"
+]
