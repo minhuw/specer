@@ -31,6 +31,11 @@ specer setup gcc --config myconfig.cfg --spec-root /opt/spec2017
 # Use environment variable to avoid typing --spec-root
 export SPEC_PATH=/opt/spec2017
 specer run gcc --cores 8
+
+# Synchronized execution with EvalSync (requires environment variables)
+export EVALSYNC_EXPERIMENT_ID=my_experiment
+export EVALSYNC_CLIENT_ID=client1
+specer run gcc --sync --cores 8      # Wait for start, run, wait for stop
 ```
 
 ## Commands

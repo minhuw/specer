@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from specer.result_parser import read_result_file
+from specer.sync import create_evalsync_worker
 from specer.utils import (
     build_affinity_command,
     build_runcpu_command,
@@ -214,6 +215,13 @@ def run_command(
             help="Whether to bind memory allocation to the same NUMA node as CPU (default: True when --numa-node is specified)",
         ),
     ] = None,
+    sync: Annotated[
+        bool,
+        typer.Option(
+            "--sync",
+            help="Enable EvalSync integration for synchronized benchmark execution with external manager (requires EVALSYNC_EXPERIMENT_ID and EVALSYNC_CLIENT_ID environment variables)",
+        ),
+    ] = False,
 ) -> None:
     """Run SPEC CPU 2017 benchmarks.
 
@@ -456,21 +464,47 @@ def run_command(
     # Also respect the deprecated --quiet flag for backward compatibility
     hide_logs = not verbose or quiet
 
-    # Execute the command with optional result parsing and time tracking
-    start_time = time.time()
-    result_info = execute_runcpu(
-        cmd,
-        verbose=verbose,
-        parse_results=should_parse,
-        spec_root=effective_spec_root,
-        hide_logs=hide_logs,
-        show_progress=hide_logs,
-        numa_node=numa_node,
-        cpu_cores=cpu_cores,
-        numa_memory=numa_memory,
-    )
-    end_time = time.time()
-    total_elapsed = end_time - start_time
+    # Initialize EvalSync worker if sync is enabled
+    evalsync_worker = None
+    if sync:
+        evalsync_worker = create_evalsync_worker(verbose=verbose)
+        if not evalsync_worker:
+            typer.echo(
+                "Warning: EvalSync integration requested but evalsync is not available",
+                err=True,
+            )
+
+    try:
+        # Send ready signal - tasks are compiled and ready to run
+        if evalsync_worker:
+            evalsync_worker.ready()
+            evalsync_worker.wait_for_start()
+
+        # Execute the command with optional result parsing and time tracking
+        start_time = time.time()
+        result_info = execute_runcpu(
+            cmd,
+            verbose=verbose,
+            parse_results=should_parse,
+            spec_root=effective_spec_root,
+            hide_logs=hide_logs,
+            show_progress=hide_logs,
+            numa_node=numa_node,
+            cpu_cores=cpu_cores,
+            numa_memory=numa_memory,
+        )
+        end_time = time.time()
+        total_elapsed = end_time - start_time
+
+        # Wait for stop signal after benchmark execution completes
+        if evalsync_worker:
+            evalsync_worker.wait_for_stop()
+
+    except Exception:
+        # Clean up EvalSync worker on error
+        if evalsync_worker:
+            evalsync_worker.cleanup()
+        raise
 
     # Display parsed results if available
     if result_info:
@@ -584,3 +618,7 @@ def run_command(
     if generated_config_path:
         with contextlib.suppress(OSError):
             Path(generated_config_path).unlink()
+
+    # Clean up EvalSync worker
+    if evalsync_worker:
+        evalsync_worker.cleanup()
