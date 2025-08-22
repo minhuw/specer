@@ -936,13 +936,30 @@ def save_results_to_json(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = f"specer_results_{timestamp}.json"
 
+    # Read config file contents if config path is provided
+    config_data = None
+    if config and Path(config).exists():
+        try:
+            with Path(config).open("r") as f:
+                config_data = {
+                    "path": config,
+                    "contents": f.read(),
+                }
+        except OSError as e:
+            logger.warning(f"Could not read config file {config}: {e}")
+            # Fallback to just storing the path
+            config_data = {"path": config, "contents": ""}
+    elif config:
+        # Config path provided but file doesn't exist (e.g., already cleaned up)
+        config_data = {"path": config, "contents": ""}
+
     # Prepare output data
     output_data = {
         "metadata": {
             "timestamp": datetime.now().isoformat(),
             "specer_version": "0.1.0",  # Could import from __version__ if needed
             "benchmarks": benchmarks or [],
-            "config": config,
+            "config": config_data,
         },
         "results": result_info,
     }
