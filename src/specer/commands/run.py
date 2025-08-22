@@ -515,6 +515,9 @@ def run_command(
         total_elapsed = end_time - start_time
         logger.debug(f"🐛 Execution completed in {total_elapsed:.2f}s")
 
+        if evalsync_worker:
+            evalsync_worker.end()
+
     except Exception:
         # Clean up EvalSync worker on error
         if evalsync_worker:

@@ -102,6 +102,12 @@ class SpecerEvalSyncWorker:
             logger.error(f"Failed to wait for start signal: {e}")
             raise
 
+    def end(self) -> None:
+        """End the EvalSync worker."""
+        if not self.worker:
+            return
+        self.worker.end()
+
     def cleanup(self) -> None:
         """Clean up the EvalSync worker connection."""
         if not self.worker:
