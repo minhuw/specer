@@ -515,10 +515,6 @@ def run_command(
         total_elapsed = end_time - start_time
         logger.debug(f"🐛 Execution completed in {total_elapsed:.2f}s")
 
-        # Wait for stop signal after benchmark execution completes
-        if evalsync_worker:
-            evalsync_worker.wait_for_stop()
-
     except Exception:
         # Clean up EvalSync worker on error
         if evalsync_worker:

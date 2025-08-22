@@ -102,22 +102,6 @@ class SpecerEvalSyncWorker:
             logger.error(f"Failed to wait for start signal: {e}")
             raise
 
-    def wait_for_stop(self) -> None:
-        """Wait for the stop signal from the manager."""
-        if not self.worker:
-            return
-
-        try:
-            console.print("⏳ Waiting for stop signal from EvalSync manager...")
-            self.worker.wait_for_stop()
-            console.print(
-                "🛑 Received stop signal - benchmark execution complete",
-                style="green bold",
-            )
-        except Exception as e:
-            logger.error(f"Failed to wait for stop signal: {e}")
-            raise
-
     def cleanup(self) -> None:
         """Clean up the EvalSync worker connection."""
         if not self.worker:
