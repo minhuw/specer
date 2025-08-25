@@ -22,9 +22,7 @@ from specer.utils import (
 def compile_command(
     benchmarks: Annotated[
         list[str],
-        typer.Argument(
-            help="Benchmarks to compile (e.g., 519.lbm_r, 500.perlbench_r, intspeed, fprate, all)"
-        ),
+        typer.Argument(help="Benchmarks to compile (e.g., 519.lbm_r, 500.perlbench_r, intspeed, fprate, all)"),
     ],
     config: Annotated[
         str | None,
@@ -129,6 +127,13 @@ def compile_command(
             help="Whether to bind memory allocation to the same NUMA node as CPU (default: True when --numa-node is specified)",
         ),
     ] = None,
+    compiler: Annotated[
+        str | None,
+        typer.Option(
+            "--compiler",
+            help="Compiler to use for auto-generated config ('gcc', 'intel', 'oneapi'). Auto-detects if not specified.",
+        ),
+    ] = None,
 ) -> None:
     """Compile SPEC CPU 2017 benchmarks.
 
@@ -141,6 +146,11 @@ def compile_command(
         specer compile intspeed --config myconfig.cfg --tune all
         specer compile gcc lbm --config myconfig.cfg --rate --rebuild
         specer compile gcc --numa-node 0 --cpu-cores 0-7  # Compile on NUMA node 0
+
+        # Intel oneAPI compiler usage:
+        specer compile intrate --compiler intel --cores 16    # Use Intel oneAPI
+        specer compile fprate --compiler oneapi --cores 8     # Explicit Intel oneAPI
+        specer compile gcc --compiler gcc --cores 4           # Force GCC usage
     """
     # Validate mutually exclusive options
     if speed and rate:
@@ -167,19 +177,12 @@ def compile_command(
                 raise typer.Exit(1)
 
             if dry_run:
-                typer.echo(
-                    f"NUMA node {numa_node} validated (CPUs: {topology['node_cpus'][numa_node]})"
-                )
+                typer.echo(f"NUMA node {numa_node} validated (CPUs: {topology['node_cpus'][numa_node]})")
 
         # Basic validation for CPU cores format
         if cpu_cores is not None:
             # Simple validation - more detailed validation would happen in numactl/taskset
-            if (
-                not cpu_cores.replace("-", "")
-                .replace(",", "")
-                .replace(" ", "")
-                .isdigit()
-            ):
+            if not cpu_cores.replace("-", "").replace(",", "").replace(" ", "").isdigit():
                 # Allow ranges and lists
                 if not re.match(r"^[\d\-,\s]+$", cpu_cores):
                     typer.echo(
@@ -198,9 +201,7 @@ def compile_command(
     else:
         prefer_speed, prefer_rate = speed, rate
 
-    converted_benchmarks = convert_benchmark_names(
-        benchmarks, prefer_speed, prefer_rate
-    )
+    converted_benchmarks = convert_benchmark_names(benchmarks, prefer_speed, prefer_rate)
 
     if dry_run and converted_benchmarks != benchmarks:
         typer.echo(f"Converted benchmark names: {benchmarks} -> {converted_benchmarks}")
@@ -215,16 +216,12 @@ def compile_command(
     # Always auto-generate config if no config is provided
     if config is None:
         # Automatically generate config from template
-        generated_config_path = generate_config_from_template(
-            cores, effective_spec_root, tune
-        )
+        generated_config_path = generate_config_from_template(cores, effective_spec_root, tune, None, compiler)
         if generated_config_path:
             effective_config = generated_config_path
             if dry_run:
                 if cores is not None:
-                    typer.echo(
-                        f"Auto-generated config file with {cores} cores: {generated_config_path}"
-                    )
+                    typer.echo(f"Auto-generated config file with {cores} cores: {generated_config_path}")
                 else:
                     typer.echo(f"Auto-generated config file: {generated_config_path}")
 
@@ -241,9 +238,7 @@ def compile_command(
                     typer.echo(f"Error reading config file: {e}", err=True)
                 typer.echo()
         else:
-            typer.echo(
-                "Error: Could not auto-generate config file from template", err=True
-            )
+            typer.echo("Error: Could not auto-generate config file from template", err=True)
             raise typer.Exit(1)
 
     if effective_config is None:

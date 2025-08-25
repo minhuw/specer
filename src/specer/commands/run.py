@@ -30,9 +30,7 @@ from specer.utils import (
 def run_command(
     benchmarks: Annotated[
         list[str],
-        typer.Argument(
-            help="Benchmarks to run (e.g., 519.lbm_r, 500.perlbench_r, intspeed, fprate, all)"
-        ),
+        typer.Argument(help="Benchmarks to run (e.g., 519.lbm_r, 500.perlbench_r, intspeed, fprate, all)"),
     ],
     config: Annotated[
         str | None,
@@ -223,6 +221,20 @@ def run_command(
             help="Enable EvalSync integration for synchronized benchmark execution with external manager (requires EVALSYNC_EXPERIMENT_ID and EVALSYNC_CLIENT_ID environment variables)",
         ),
     ] = False,
+    config_add: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--config-add",
+            help="Add custom configuration sections to auto-generated config file. Format: 'section:key=value' (e.g., 'fprate,fpspeed=base:FOPTIMIZE=-fno-unsafe-math-optimizations'). Can be used multiple times.",
+        ),
+    ] = None,
+    compiler: Annotated[
+        str | None,
+        typer.Option(
+            "--compiler",
+            help="Compiler to use for auto-generated config ('gcc', 'intel', 'oneapi'). Auto-detects if not specified.",
+        ),
+    ] = None,
 ) -> None:
     """Run SPEC CPU 2017 benchmarks.
 
@@ -257,6 +269,15 @@ def run_command(
         specer run gcc --cpu-cores 0,2,4,6             # Bind to specific cores
         specer run intrate --numa-node 1 --cpu-cores 8-15  # NUMA node 1, cores 8-15
         specer run gcc --numa-node 0 --no-numa-memory  # NUMA node 0, but don't bind memory
+
+        # Custom config additions:
+        specer run fprate --config-add "fprate,fpspeed=base:FOPTIMIZE=-fno-unsafe-math-optimizations"
+        specer run gcc --config-add "intrate=base:OPTIMIZE=-O3" --config-add "fprate=base:FOPTIMIZE=-ffast-math"
+
+        # Intel oneAPI compiler usage:
+        specer run intrate --compiler intel --cores 16      # Use Intel oneAPI (auto-detected)
+        specer run fprate --compiler oneapi --cores 8       # Explicit Intel oneAPI
+        specer run gcc --compiler gcc --cores 4             # Force GCC usage
     """
     # Validate mutually exclusive options
     if speed and rate:
@@ -277,9 +298,7 @@ def run_command(
             typer.echo("  fprate     - Floating-point rate benchmarks", err=True)
             typer.echo("  all        - All benchmark suites", err=True)
             typer.echo("", err=True)
-            typer.echo(
-                "For individual benchmarks, use --noreportable instead:", err=True
-            )
+            typer.echo("For individual benchmarks, use --noreportable instead:", err=True)
             typer.echo(f"  specer run {' '.join(benchmarks)} --noreportable", err=True)
             raise typer.Exit(1)
 
@@ -303,19 +322,12 @@ def run_command(
                 raise typer.Exit(1)
 
             if dry_run:
-                typer.echo(
-                    f"NUMA node {numa_node} validated (CPUs: {topology['node_cpus'][numa_node]})"
-                )
+                typer.echo(f"NUMA node {numa_node} validated (CPUs: {topology['node_cpus'][numa_node]})")
 
         # Basic validation for CPU cores format
         if cpu_cores is not None:
             # Simple validation - more detailed validation would happen in numactl/taskset
-            if (
-                not cpu_cores.replace("-", "")
-                .replace(",", "")
-                .replace(" ", "")
-                .isdigit()
-            ):
+            if not cpu_cores.replace("-", "").replace(",", "").replace(" ", "").isdigit():
                 # Allow ranges and lists
                 if not re.match(r"^[\d\-,\s]+$", cpu_cores):
                     typer.echo(
@@ -339,9 +351,7 @@ def run_command(
         # Automatically generate config from template
         logger.debug("🐛 Generating config from template")
 
-        generated_config_path = generate_config_from_template(
-            cores, effective_spec_root, tune
-        )
+        generated_config_path = generate_config_from_template(cores, effective_spec_root, tune, config_add, compiler)
 
         if generated_config_path:
             logger.debug(f"🐛 Config generated: {generated_config_path}")
@@ -352,15 +362,29 @@ def run_command(
             effective_config = generated_config_path
             if dry_run:
                 if cores is not None:
-                    typer.echo(
-                        f"Auto-generated config file with {cores} cores: {generated_config_path}"
-                    )
+                    typer.echo(f"Auto-generated config file with {cores} cores: {generated_config_path}")
                 else:
                     typer.echo(f"Auto-generated config file: {generated_config_path}")
+
+                if config_add:
+                    typer.echo("Custom config additions:")
+                    for addition in config_add:
+                        typer.echo(f"  {addition}")
+
+            # Show config content if verbose mode is enabled
+            if verbose:
+                typer.echo("\n" + "=" * 60)
+                typer.echo("AUTO-GENERATED CONFIG FILE CONTENT:")
+                typer.echo("=" * 60)
+                try:
+                    config_content = Path(generated_config_path).read_text()
+                    typer.echo(config_content)
+                    typer.echo("=" * 60)
+                except Exception as e:
+                    typer.echo(f"Error reading config file: {e}", err=True)
+                typer.echo()
         else:
-            typer.echo(
-                "Error: Could not auto-generate config file from template", err=True
-            )
+            typer.echo("Error: Could not auto-generate config file from template", err=True)
             raise typer.Exit(1)
 
     if effective_config is None:
@@ -378,9 +402,7 @@ def run_command(
         prefer_speed, prefer_rate = speed, rate
 
     logger.debug(f"🐛 Converting benchmarks: {benchmarks}")
-    converted_benchmarks = convert_benchmark_names(
-        benchmarks, prefer_speed, prefer_rate
-    )
+    converted_benchmarks = convert_benchmark_names(benchmarks, prefer_speed, prefer_rate)
     logger.debug(f"🐛 Converted benchmarks: {converted_benchmarks}")
 
     if dry_run and converted_benchmarks != benchmarks:
@@ -532,31 +554,21 @@ def run_command(
             all_benchmark_results = {}
 
             # Prioritize RSF files for parsing (most accurate and complete data)
-            rsf_files = [
-                f for f in result_info["result_files"] if f["path"].endswith(".rsf")
-            ]
-            other_files = [
-                f for f in result_info["result_files"] if not f["path"].endswith(".rsf")
-            ]
+            rsf_files = [f for f in result_info["result_files"] if f["path"].endswith(".rsf")]
+            other_files = [f for f in result_info["result_files"] if not f["path"].endswith(".rsf")]
 
             # Process RSF files first (they have the most complete data)
             for file_info in rsf_files:
-                detailed_results = read_result_file(
-                    file_info["path"], effective_spec_root
-                )
+                detailed_results = read_result_file(file_info["path"], effective_spec_root)
                 if detailed_results and detailed_results.get("benchmark_results"):
                     all_benchmark_results.update(detailed_results["benchmark_results"])
 
             # Only process other files if no RSF data was found
             if not all_benchmark_results:
                 for file_info in other_files:
-                    detailed_results = read_result_file(
-                        file_info["path"], effective_spec_root
-                    )
+                    detailed_results = read_result_file(file_info["path"], effective_spec_root)
                     if detailed_results and detailed_results.get("benchmark_results"):
-                        all_benchmark_results.update(
-                            detailed_results["benchmark_results"]
-                        )
+                        all_benchmark_results.update(detailed_results["benchmark_results"])
 
             if all_benchmark_results:
                 enriched_results["benchmark_results"] = all_benchmark_results
@@ -592,9 +604,7 @@ def run_command(
                 typer.echo("\n🔬 Individual Benchmark Results:")
                 for benchmark, data in enriched_results["benchmark_results"].items():
                     if "ratio" in data and "time" in data:
-                        typer.echo(
-                            f"  {benchmark}: ratio={data['ratio']}, time={data['time']}s"
-                        )
+                        typer.echo(f"  {benchmark}: ratio={data['ratio']}, time={data['time']}s")
                     elif "ratio" in data:
                         typer.echo(f"  {benchmark}: ratio={data['ratio']}")
 
@@ -605,12 +615,7 @@ def run_command(
                 elapsed_time = enriched_results["execution_time"]
                 minutes = int(elapsed_time // 60)
                 seconds = elapsed_time % 60
-
-                if minutes > 0:
-                    time_str = f"{minutes}m {seconds:.1f}s"
-                else:
-                    time_str = f"{seconds:.1f}s"
-
+                time_str = f"{minutes}m {seconds:.1f}s" if minutes > 0 else f"{seconds:.1f}s"
                 typer.echo(f"\n⏱️  Execution Time: {time_str}")
 
         # Save to JSON if requested

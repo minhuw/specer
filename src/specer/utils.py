@@ -73,9 +73,7 @@ def validate_and_get_spec_root(spec_root: Path | None) -> Path:
             return Path(env_spec_path)
 
         typer.echo("Error: --spec-root is required", err=True)
-        typer.echo(
-            "Please specify the path to your SPEC CPU 2017 installation:", err=True
-        )
+        typer.echo("Please specify the path to your SPEC CPU 2017 installation:", err=True)
         typer.echo("  specer <command> --spec-root /path/to/spec2017", err=True)
         typer.echo("Or set the SPEC_PATH environment variable:", err=True)
         typer.echo("  export SPEC_PATH=/path/to/spec2017", err=True)
@@ -84,9 +82,7 @@ def validate_and_get_spec_root(spec_root: Path | None) -> Path:
     return spec_root
 
 
-def convert_benchmark_names(
-    benchmarks: list[str], prefer_speed: bool = False, prefer_rate: bool = False
-) -> list[str]:
+def convert_benchmark_names(benchmarks: list[str], prefer_speed: bool = False, prefer_rate: bool = False) -> list[str]:
     """Convert simple benchmark names to full SPEC CPU 2017 names.
 
     Args:
@@ -168,17 +164,13 @@ def detect_gcc_version() -> int | None:
         The major version number of GCC, or None if detection fails
     """
     # First check if gcc is available
-    which_result = subprocess.run(
-        ["which", "gcc"], capture_output=True, text=True, timeout=5
-    )
+    which_result = subprocess.run(["which", "gcc"], capture_output=True, text=True, timeout=5)
 
     if which_result.returncode != 0:
         return None
 
     # Get GCC version
-    version_result = subprocess.run(
-        ["gcc", "--version"], capture_output=True, text=True, timeout=5
-    )
+    version_result = subprocess.run(["gcc", "--version"], capture_output=True, text=True, timeout=5)
 
     if version_result.returncode != 0:
         return None
@@ -227,9 +219,7 @@ def detect_gcc_path() -> str | None:
         The parent directory of the GCC binary (without /bin), or None if detection fails
     """
     # First check if gcc is available
-    which_result = subprocess.run(
-        ["which", "gcc"], capture_output=True, text=True, timeout=5
-    )
+    which_result = subprocess.run(["which", "gcc"], capture_output=True, text=True, timeout=5)
 
     if which_result.returncode != 0:
         logger.debug("🐛 GCC not found in PATH")
@@ -255,20 +245,484 @@ def detect_gcc_path() -> str | None:
     return detected_path
 
 
+def detect_intel_oneapi_path() -> str | None:
+    """Detect Intel oneAPI installation path and validate compiler availability.
+
+    This function attempts to locate Intel oneAPI compilers (icx, icpx, ifx) and
+    returns the oneAPI installation root directory.
+
+    Detection strategy:
+    1. Check for ICX (Intel C compiler) in PATH
+    2. Check for ONEAPI_ROOT environment variable
+    3. Check common installation paths (/opt/intel/oneapi)
+    4. Validate that setvars.sh exists for environment setup
+
+    Returns:
+        Path to oneAPI installation root, or None if not found
+    """
+
+    # Strategy 1: Check if icx is available in PATH
+    try:
+        which_result = subprocess.run(["which", "icx"], capture_output=True, text=True, timeout=5)
+
+        if which_result.returncode == 0:
+            icx_path = which_result.stdout.strip()
+            if icx_path:
+                logger.info(f"✅ Found ICX binary at: {icx_path}")
+
+                # Try to derive oneAPI root from icx path
+                # /opt/intel/oneapi/compiler/latest/linux/bin/icx -> /opt/intel/oneapi
+                current_path = Path(icx_path).parent
+
+                for _ in range(6):  # Reasonable limit to avoid infinite loops
+                    if current_path.name == "oneapi" and (current_path / "setvars.sh").exists():
+                        logger.info(f"✅ Intel oneAPI root found via icx: {current_path}")
+                        return str(current_path)
+                    current_path = current_path.parent
+                    if current_path == current_path.parent:  # Reached filesystem root
+                        break
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        logger.warning(f"⚠️  Error running 'which icx': {e}")
+
+    # Strategy 2: Check ONEAPI_ROOT environment variable
+    oneapi_root = os.environ.get("ONEAPI_ROOT")
+
+    if oneapi_root:
+        oneapi_path = Path(oneapi_root)
+        setvars_path = oneapi_path / "setvars.sh"
+
+        if oneapi_path.exists() and setvars_path.exists():
+            logger.info(f"✅ Intel oneAPI root found via ONEAPI_ROOT: {oneapi_path}")
+            return str(oneapi_path)
+
+        # Strategy 3: Check common installation paths
+    common_paths = [
+        Path("/opt/intel/oneapi"),
+        Path("/intel/oneapi"),
+        Path.home() / "intel" / "oneapi",
+    ]
+
+    for path in common_paths:
+        oneapi_path = path
+        if oneapi_path.exists():
+            setvars_path = oneapi_path / "setvars.sh"
+            if setvars_path.exists():
+                logger.info(f"✅ Intel oneAPI root found at: {oneapi_path}")
+                return str(oneapi_path)
+
+    # Strategy 4: Check current environment for Intel variables
+    intel_env_vars = {k: v for k, v in os.environ.items() if "INTEL" in k.upper() or "ONEAPI" in k.upper()}
+    if intel_env_vars:
+        for var, value in intel_env_vars.items():
+            logger.debug(f"🐛   {var}={value}")
+
+    # Strategy 5: Check PATH for Intel directories
+    path_env = os.environ.get("PATH", "")
+    intel_paths = [p for p in path_env.split(":") if "intel" in p.lower() or "oneapi" in p.lower()]
+    if intel_paths:
+        for intel_path in intel_paths:
+            # Try to find oneAPI root from these paths
+            current_path = Path(intel_path)
+            for _ in range(5):
+                if current_path.name == "oneapi" and (current_path / "setvars.sh").exists():
+                    logger.info(f"✅ Intel oneAPI root found via PATH analysis: {current_path}")
+                    return str(current_path)
+                current_path = current_path.parent
+                if current_path == current_path.parent:
+                    break
+
+    logger.warning("⚠️  Intel oneAPI not found using any detection strategy")
+    return None
+
+
+def setup_intel_oneapi_environment(oneapi_path: str) -> dict[str, str]:
+    """Set up Intel oneAPI environment variables by sourcing setvars.sh.
+
+    Args:
+        oneapi_path: Path to Intel oneAPI installation root
+
+    Returns:
+        Dictionary of environment variables to be set
+    """
+    logger.info(f"🔧 Setting up Intel oneAPI environment from: {oneapi_path}")
+    env_vars: dict[str, str] = {}
+
+    try:
+        # Source the setvars.sh script and capture environment variables
+        setvars_script = Path(oneapi_path) / "setvars.sh"
+        logger.debug(f"🐛 Looking for setvars.sh at: {setvars_script}")
+
+        if not setvars_script.exists():
+            logger.warning(f"⚠️  setvars.sh not found at {setvars_script}")
+            return env_vars
+
+        logger.info(f"✅ Found setvars.sh at: {setvars_script}")
+
+        # Run a shell command that sources setvars.sh and prints environment
+        # Use --force to override existing vars, no config file needed
+        cmd = f'source "{setvars_script}" --force 2>/dev/null && env'
+
+        logger.debug(f"🐛 Running command: {cmd}")
+
+        result = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=30)
+
+        logger.debug(f"🐛 setvars.sh command return code: {result.returncode}")
+
+        if result.returncode == 0:
+            logger.info("✅ Successfully sourced setvars.sh")
+
+            # Parse environment variables from output
+            env_lines = result.stdout.strip().split("\n")
+            logger.debug(f"🐛 Got {len(env_lines)} environment lines")
+
+            for line in env_lines:
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    # Capture Intel-related and important PATH variables
+                    if any(
+                        intel_prefix in key.upper()
+                        for intel_prefix in [
+                            "INTEL",
+                            "ONEAPI",
+                            "MKLROOT",
+                            "TBBROOT",
+                            "DAALROOT",
+                            "IPPROOT",
+                            "CPATH",
+                            "LIBRARY_PATH",
+                            "LD_LIBRARY_PATH",
+                            "PATH",
+                        ]
+                    ):
+                        env_vars[key] = value
+                        logger.debug(f"🐛 Captured env var: {key}={value[:100]}...")
+
+            logger.info(f"✅ Captured {len(env_vars)} Intel oneAPI environment variables")
+
+            # Specifically log PATH to see if Intel compilers are included
+            if "PATH" in env_vars:
+                path_dirs = env_vars["PATH"].split(":")
+                intel_path_dirs = [p for p in path_dirs if "intel" in p.lower() or "oneapi" in p.lower()]
+                logger.info(f"🔍 Intel paths in PATH: {intel_path_dirs}")
+
+        else:
+            logger.warning(f"⚠️  Failed to source setvars.sh with return code {result.returncode}")
+            logger.debug(f"🐛 setvars.sh stderr: {result.stderr}")
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        logger.warning(f"⚠️  Error setting up Intel oneAPI environment: {e}")
+
+    return env_vars
+
+
+def validate_intel_oneapi_setup() -> bool:
+    """Validate that Intel oneAPI compilers are properly set up and accessible.
+
+    Returns:
+        True if at least C/C++ compilers are available and working, False otherwise
+    """
+    logger.info("🔍 Validating Intel oneAPI compiler setup...")
+
+    # Essential compilers (C and C++) - these must work
+    essential_compilers = ["icx", "icpx"]
+    # Optional compilers (Fortran) - nice to have but not required
+    optional_compilers = ["ifx"]
+
+    essential_working = 0
+
+    for compiler in essential_compilers + optional_compilers:
+        is_essential = compiler in essential_compilers
+        logger.debug(f"🐛 Checking {compiler} compiler ({'essential' if is_essential else 'optional'})...")
+
+        try:
+            # First check if compiler is in PATH
+            which_result = subprocess.run(["which", compiler], capture_output=True, text=True, timeout=5)
+
+            logger.debug(f"🐛 'which {compiler}' return code: {which_result.returncode}")
+            logger.debug(f"🐛 'which {compiler}' stdout: '{which_result.stdout.strip()}'")
+
+            if which_result.returncode != 0:
+                if is_essential:
+                    logger.warning(f"⚠️  {compiler} not found in PATH")
+                    return False
+                else:
+                    logger.info(f"ℹ️  {compiler} not found in PATH (optional)")
+                    continue
+
+            compiler_path = which_result.stdout.strip()
+            logger.debug(f"🐛 {compiler} found at: {compiler_path}")
+
+            # Check if the binary is executable
+            if not (Path(compiler_path).is_file() and os.access(compiler_path, os.X_OK)):
+                if is_essential:
+                    logger.warning(f"⚠️  {compiler} found but not executable: {compiler_path}")
+                    return False
+                else:
+                    logger.info(f"ℹ️  {compiler} found but not executable (optional): {compiler_path}")
+                    continue
+
+            # Test compiler version
+            result = subprocess.run([compiler, "--version"], capture_output=True, text=True, timeout=10)
+
+            logger.debug(f"🐛 '{compiler} --version' return code: {result.returncode}")
+            logger.debug(f"🐛 '{compiler} --version' stdout: '{result.stdout.strip()[:100]}...'")
+
+            if result.returncode != 0:
+                if is_essential:
+                    logger.warning(f"⚠️  {compiler} --version failed with return code {result.returncode}")
+                    logger.debug(f"🐛 {compiler} stderr: {result.stderr.strip()}")
+                    return False
+                else:
+                    logger.info(f"ℹ️  {compiler} --version failed (optional)")
+                    continue
+
+            logger.info(f"✅ {compiler} compiler validated successfully")
+            if is_essential:
+                essential_working += 1
+
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+            if is_essential:
+                logger.warning(f"⚠️  Error checking {compiler}: {e}")
+                return False
+            else:
+                logger.info(f"ℹ️  Error checking {compiler} (optional): {e}")
+
+    if essential_working == len(essential_compilers):
+        logger.info("✅ Intel oneAPI C/C++ compilers validated successfully")
+        return True
+    else:
+        logger.warning(f"⚠️  Only {essential_working}/{len(essential_compilers)} essential Intel compilers working")
+        return False
+
+
+def detect_intel_compiler_version() -> str | None:
+    """Detect Intel compiler version using icx --version.
+
+    Returns:
+        Version string (e.g., "2024.0.0"), or None if detection fails
+    """
+    try:
+        version_result = subprocess.run(["icx", "--version"], capture_output=True, text=True, timeout=10)
+
+        if version_result.returncode == 0:
+            version_output = version_result.stdout.strip()
+            # Parse version from output like "Intel(R) oneAPI DPC++/C++ Compiler 2024.0.0"
+            import re
+
+            version_match = re.search(r"(\d+\.\d+\.\d+)", version_output)
+            if version_match:
+                version = version_match.group(1)
+                logger.debug(f"🐛 Intel compiler version: {version}")
+                return version
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+        logger.debug("🐛 Could not detect Intel compiler version")
+
+    return None
+
+
+def generate_intel_config_additions(oneapi_path: str) -> list[str]:
+    """Generate Intel oneAPI-specific configuration additions.
+
+    Args:
+        oneapi_path: Path to Intel oneAPI installation root
+
+    Returns:
+        List of config additions in 'section:key=value' format
+    """
+    logger.info(f"🔧 Generating Intel oneAPI config additions for: {oneapi_path}")
+    config_additions = []
+
+    # Find the actual compiler paths - try multiple possible locations
+    possible_compiler_paths = [
+        Path(oneapi_path) / "compiler" / "latest" / "bin",  # Direct bin (newer versions)
+        Path(oneapi_path) / "compiler" / "latest" / "linux" / "bin",  # Linux-specific bin (older versions)
+    ]
+
+    # Also check for version-specific paths
+    compiler_dir = Path(oneapi_path) / "compiler"
+    if compiler_dir.exists():
+        for version_dir in compiler_dir.iterdir():
+            if version_dir.is_dir() and version_dir.name != "latest":
+                possible_compiler_paths.extend(
+                    [
+                        version_dir / "bin",
+                        version_dir / "linux" / "bin",
+                    ]
+                )
+
+    # Find the first path that contains icx
+    compiler_base_path = None
+    for path in possible_compiler_paths:
+        if (path / "icx").exists():
+            compiler_base_path = path
+            logger.debug(f"🐛 Found compiler path: {compiler_base_path}")
+            break
+
+    if not compiler_base_path:
+        logger.warning("⚠️  Could not find Intel compilers in any expected location")
+        # Fallback to the standard path
+        compiler_base_path = Path(oneapi_path) / "compiler" / "latest" / "bin"
+
+    # Check if compilers exist at expected locations
+    icx_path = compiler_base_path / "icx"
+    icpx_path = compiler_base_path / "icpx"
+    ifx_path = compiler_base_path / "ifx"
+
+    logger.debug("🐛 Looking for compilers at:")
+    logger.debug(f"🐛   ICX: {icx_path} (exists: {icx_path.exists()})")
+    logger.debug(f"🐛   ICPX: {icpx_path} (exists: {icpx_path.exists()})")
+    logger.debug(f"🐛   IFX: {ifx_path} (exists: {ifx_path.exists()})")
+
+    # Use full paths if available, otherwise use simple names (assuming PATH is set)
+    cc_compiler = str(icx_path) if icx_path.exists() else "icx"
+    cxx_compiler = str(icpx_path) if icpx_path.exists() else "icpx"
+
+    # Handle Fortran compiler - it might not be installed
+    if ifx_path.exists():
+        fc_compiler = str(ifx_path)
+        logger.info(f"🔧 Using compilers: CC={cc_compiler}, CXX={cxx_compiler}, FC={fc_compiler}")
+    else:
+        fc_compiler = None
+        logger.warning("⚠️  Fortran compiler (ifx) not found, skipping Fortran configuration")
+        logger.info(f"🔧 Using compilers: CC={cc_compiler}, CXX={cxx_compiler}")
+
+    # Set Intel compilers for all benchmark suites
+    suites = ["intrate", "intspeed", "fprate", "fpspeed"]
+
+    # Get Intel oneAPI environment for additional paths
+    # Note: We call this to ensure environment is set up, but don't use the return value here
+    setup_intel_oneapi_environment(oneapi_path)
+
+    # Build library and include paths
+    lib_paths = []
+    include_paths = []
+
+    # Standard Intel oneAPI library paths - check multiple possible locations
+    standard_lib_paths = [
+        f"{oneapi_path}/compiler/latest/lib",
+        f"{oneapi_path}/compiler/latest/linux/lib",
+        f"{oneapi_path}/compiler/latest/linux/lib/x64",
+        f"{oneapi_path}/mkl/latest/lib/intel64",
+        f"{oneapi_path}/tbb/latest/lib/intel64/gcc4.8",
+    ]
+
+    # Also add version-specific library paths
+    if compiler_base_path:
+        version_lib_paths = [
+            str(compiler_base_path.parent / "lib"),
+            str(compiler_base_path.parent / "lib" / "x64"),
+        ]
+        standard_lib_paths.extend(version_lib_paths)
+
+    for lib_path in standard_lib_paths:
+        if Path(lib_path).exists():
+            lib_paths.append(lib_path)
+            logger.debug(f"🐛 Added library path: {lib_path}")
+
+    # Standard Intel oneAPI include paths - check multiple possible locations
+    standard_include_paths = [
+        f"{oneapi_path}/compiler/latest/include",
+        f"{oneapi_path}/compiler/latest/linux/include",
+        f"{oneapi_path}/mkl/latest/include",
+        f"{oneapi_path}/tbb/latest/include",
+    ]
+
+    # Also add version-specific include paths
+    if compiler_base_path:
+        version_include_paths = [
+            str(compiler_base_path.parent / "include"),
+        ]
+        standard_include_paths.extend(version_include_paths)
+
+    for include_path in standard_include_paths:
+        if Path(include_path).exists():
+            include_paths.append(include_path)
+            logger.debug(f"🐛 Added include path: {include_path}")
+
+    # Build LDFLAGS and CPPFLAGS
+    ldflags = " ".join([f"-L{path}" for path in lib_paths])
+    cppflags = " ".join([f"-I{path}" for path in include_paths])
+
+    logger.info(f"🔧 Generated LDFLAGS: {ldflags}")
+    logger.info(f"🔧 Generated CPPFLAGS: {cppflags}")
+
+    for suite in suites:
+        # Base tuning level configurations
+        base_configs = [
+            f"{suite}=base:CC={cc_compiler}",
+            f"{suite}=base:CXX={cxx_compiler}",
+            # Intel-specific optimizations
+            f"{suite}=base:OPTIMIZE=-O3 -xHost -ipo",
+            f"{suite}=base:COPTIMIZE=-O3 -xHost -ipo",
+            f"{suite}=base:CXXOPTIMIZE=-O3 -xHost -ipo",
+        ]
+
+        # Add Fortran compiler and optimization if available
+        if fc_compiler:
+            base_configs.extend(
+                [
+                    f"{suite}=base:FC={fc_compiler}",
+                    f"{suite}=base:FOPTIMIZE=-O3 -xHost -ipo",
+                ]
+            )
+
+        # Add library and include paths if available
+        if ldflags:
+            base_configs.append(f"{suite}=base:LDFLAGS={ldflags}")
+        if cppflags:
+            base_configs.append(f"{suite}=base:CPPFLAGS={cppflags}")
+
+        config_additions.extend(base_configs)
+
+        # Peak tuning level configurations (more aggressive optimizations)
+        peak_configs = [
+            f"{suite}=peak:CC={cc_compiler}",
+            f"{suite}=peak:CXX={cxx_compiler}",
+            f"{suite}=peak:OPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
+            f"{suite}=peak:COPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
+            f"{suite}=peak:CXXOPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
+        ]
+
+        # Add Fortran compiler and optimization if available
+        if fc_compiler:
+            peak_configs.extend(
+                [
+                    f"{suite}=peak:FC={fc_compiler}",
+                    f"{suite}=peak:FOPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
+                ]
+            )
+
+        # Add library and include paths if available
+        if ldflags:
+            peak_configs.append(f"{suite}=peak:LDFLAGS={ldflags}")
+        if cppflags:
+            peak_configs.append(f"{suite}=peak:CPPFLAGS={cppflags}")
+
+        config_additions.extend(peak_configs)
+
+    logger.info(f"✅ Generated {len(config_additions)} Intel oneAPI configuration entries")
+    return config_additions
+
+
 def generate_config_from_template(
     cores: int | None = None,
     spec_root: Path | None = None,
     tune: str | None = None,
+    config_add: list[str] | None = None,
+    compiler: str | None = None,
 ) -> str | None:
     """Generate a SPEC CPU 2017 config file from SPEC's official template.
 
     Uses the Example-gcc-linux-x86.cfg template from the SPEC installation
-    and modifies the copies value for rate benchmarks and tune setting.
+    and modifies the copies value for rate benchmarks, tune setting, and
+    adds custom configuration sections. Supports both GCC and Intel oneAPI compilers.
 
     Args:
         cores: Number of cores to use (for copies in rate benchmarks)
         spec_root: Path to SPEC installation directory
         tune: Tuning level (base, peak, all)
+        config_add: List of custom config additions in format 'section:key=value'
+        compiler: Compiler to use ('gcc', 'intel', 'oneapi', or None for auto-detection)
 
     Returns:
         Path to the generated config file, or None if template not found
@@ -298,26 +752,86 @@ def generate_config_from_template(
             '%   define label "specer"           # (2)      Use a label meaningful to *you*.',
         )
 
-        # Auto-detect GCC version and uncomment GCCge10 if needed
+        # Determine which compiler to use
+        effective_compiler = compiler
+        if not effective_compiler:
+            # Auto-detect available compilers
+            oneapi_path = detect_intel_oneapi_path()
+            gcc_path = detect_gcc_path()
 
-        gcc_version = detect_gcc_version()
-        if gcc_version and gcc_version >= 10:
-            # Uncomment the GCCge10 define for GCC 10+
-            old_line = "#%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later"
-            new_line = "%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later (auto-detected)"
-            template_content = template_content.replace(old_line, new_line)
+            if oneapi_path:
+                effective_compiler = "intel"
+                logger.debug("🐛 Auto-detected Intel oneAPI compiler")
+            elif gcc_path:
+                effective_compiler = "gcc"
+                logger.debug("🐛 Auto-detected GCC compiler")
+            else:
+                effective_compiler = "gcc"  # Fallback to GCC template
+                logger.warning("⚠️  No compiler detected, using GCC template as fallback")
 
-        # Auto-detect GCC path and update gcc_dir
-        gcc_path = detect_gcc_path()
-        if gcc_path:
-            logger.debug(f"🐛 Detected GCC path: {gcc_path}")
-            # Replace the gcc_dir define (this handles both the main and conditional cases)
-            old_line = '%   define  gcc_dir        "/opt/rh/devtoolset-9/root/usr"  # EDIT (see above)'
-            new_line = f'%   define  gcc_dir        "{gcc_path}"  # EDIT (see above) (auto-detected)'
-            template_content = template_content.replace(old_line, new_line, 1)
-            logger.debug("🐛 Updated GCC directory in config template")
-        else:
-            logger.warning("⚠️  Could not detect GCC path, using default in template")
+        # Handle Intel oneAPI compiler configuration
+        if effective_compiler in ["intel", "oneapi"]:
+            oneapi_path = detect_intel_oneapi_path()
+            if oneapi_path:
+                logger.info(f"🔧 Configuring Intel oneAPI at: {oneapi_path}")
+
+                # Set up Intel oneAPI environment
+                intel_env_vars = setup_intel_oneapi_environment(oneapi_path)
+
+                # Validate that Intel compilers are available after environment setup
+                if intel_env_vars and "PATH" in intel_env_vars:
+                    # Temporarily update environment to test compiler availability
+                    original_path = os.environ.get("PATH", "")
+                    try:
+                        os.environ["PATH"] = intel_env_vars["PATH"]
+                        if validate_intel_oneapi_setup():
+                            logger.info("✅ Intel oneAPI compilers validated successfully")
+                        else:
+                            logger.warning("⚠️  Intel oneAPI validation failed, falling back to GCC")
+                            effective_compiler = "gcc"
+                    finally:
+                        os.environ["PATH"] = original_path
+                else:
+                    logger.warning("⚠️  Failed to set up Intel oneAPI environment, falling back to GCC")
+                    effective_compiler = "gcc"
+
+                if effective_compiler in ["intel", "oneapi"]:
+                    # Generate Intel-specific config additions
+                    intel_additions = generate_intel_config_additions(oneapi_path)
+
+                    # Merge with user-provided config additions
+                    if config_add is None:
+                        config_add = []
+                    config_add.extend(intel_additions)
+
+                    logger.info(f"✅ Added {len(intel_additions)} Intel oneAPI config entries")
+            else:
+                logger.warning("⚠️  Intel compiler requested but oneAPI not found, falling back to GCC")
+                effective_compiler = "gcc"
+
+        # Handle GCC compiler configuration (default behavior)
+        if effective_compiler == "gcc":
+            # Auto-detect GCC version and uncomment GCCge10 if needed
+            gcc_version = detect_gcc_version()
+            if gcc_version and gcc_version >= 10:
+                # Uncomment the GCCge10 define for GCC 10+
+                old_line = "#%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later"
+                new_line = (
+                    "%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later (auto-detected)"
+                )
+                template_content = template_content.replace(old_line, new_line)
+
+            # Auto-detect GCC path and update gcc_dir
+            gcc_path = detect_gcc_path()
+            if gcc_path:
+                logger.debug(f"🐛 Detected GCC path: {gcc_path}")
+                # Replace the gcc_dir define (this handles both the main and conditional cases)
+                old_line = '%   define  gcc_dir        "/opt/rh/devtoolset-9/root/usr"  # EDIT (see above)'
+                new_line = f'%   define  gcc_dir        "{gcc_path}"  # EDIT (see above) (auto-detected)'
+                template_content = template_content.replace(old_line, new_line, 1)
+                logger.debug("🐛 Updated GCC directory in config template")
+            else:
+                logger.warning("⚠️  Could not detect GCC path, using default in template")
 
         # Update tune setting based on CLI parameter
         if tune is not None:
@@ -328,6 +842,75 @@ def generate_config_from_template(
                 'tune                 = base,peak  # EDIT if needed: set to "base" for old GCC.',
                 f'tune                 = {tune_value}  # EDIT if needed: set to "base" for old GCC. (auto-set)',
             )
+
+        # Process custom config additions
+        if config_add:
+            for addition in config_add:
+                try:
+                    # Parse the format: "section:key=value"
+                    if ":" not in addition:
+                        logger.warning(f"⚠️  Invalid config addition format: {addition}. Expected 'section:key=value'")
+                        continue
+
+                    section_part, config_part = addition.split(":", 1)
+
+                    if "=" not in config_part:
+                        logger.warning(f"⚠️  Invalid config addition format: {addition}. Expected 'section:key=value'")
+                        continue
+
+                    key, value = config_part.split("=", 1)
+
+                    # Clean up whitespace
+                    section_part = section_part.strip()
+                    key = key.strip()
+                    value = value.strip()
+
+                    # Create the config section content
+                    section_header = f"{section_part}:"
+                    config_line = f"      {key:<15} = {value}"
+                    section_content = f"{section_header}\n{config_line}"
+
+                    # Check if the section already exists
+                    if section_header in template_content:
+                        # Find the section and add the config line after it
+                        # Look for the section header followed by a newline
+                        section_index = template_content.find(section_header)
+                        if section_index != -1:
+                            # Find the end of the line
+                            line_end = template_content.find("\n", section_index)
+                            if line_end != -1:
+                                # Insert the config line after the section header
+                                template_content = (
+                                    template_content[:line_end] + f"\n{config_line}" + template_content[line_end:]
+                                )
+                    else:
+                        # Section doesn't exist, add it before the benchmark sections
+                        # Find a good insertion point (typically before the first benchmark section)
+                        insertion_patterns = [
+                            "intrate=base:",
+                            "intspeed=base:",
+                            "fprate=base:",
+                            "fpspeed=base:",
+                            "intrate,fprate=base:",
+                            "intspeed,fpspeed=base:",
+                        ]
+
+                        inserted = False
+                        for pattern in insertion_patterns:
+                            if pattern in template_content:
+                                template_content = template_content.replace(pattern, section_content + "\n\n" + pattern)
+                                inserted = True
+                                break
+
+                        if not inserted:
+                            # Fallback: add at the end of the file
+                            template_content += f"\n\n{section_content}\n"
+
+                    logger.debug(f"🐛 Added config: {section_part} -> {key} = {value}")
+
+                except ValueError as e:
+                    logger.warning(f"⚠️  Error processing config addition '{addition}': {e}")
+                    continue
 
         # Modify the copies value for rate benchmarks
         # Find the line with "copies = 1" and replace it
@@ -468,9 +1051,7 @@ def validate_numa_topology() -> dict[str, Any] | None:
         Dictionary with NUMA topology information, or None if NUMA not available
     """
     # Try to get NUMA topology using numactl --hardware
-    result = subprocess.run(
-        ["numactl", "--hardware"], capture_output=True, text=True, timeout=10
-    )
+    result = subprocess.run(["numactl", "--hardware"], capture_output=True, text=True, timeout=10)
 
     if result.returncode != 0:
         return None
@@ -499,9 +1080,7 @@ def validate_numa_topology() -> dict[str, Any] | None:
                         cpus_start = True
                 node_cpus_dict[node_id] = cpu_list
                 if cpu_list:
-                    topology["total_cpus"] = max(
-                        topology["total_cpus"], max(cpu_list) + 1
-                    )
+                    topology["total_cpus"] = max(topology["total_cpus"], max(cpu_list) + 1)
 
     return topology if nodes_list else None
 
@@ -626,14 +1205,8 @@ def execute_runcpu(
     if verbose:
         logger.info(f"ℹ️  Executing: [bold]{' '.join(final_cmd)}[/bold]")
         if final_cmd != cmd:
-            affinity_part = final_cmd[
-                : final_cmd.index("--")
-                if "--" in final_cmd
-                else len(final_cmd) - len(cmd)
-            ]
-            logger.info(
-                f"ℹ️  Applied affinity binding: [bold]{' '.join(affinity_part)}[/bold]"
-            )
+            affinity_part = final_cmd[: final_cmd.index("--") if "--" in final_cmd else len(final_cmd) - len(cmd)]
+            logger.info(f"ℹ️  Applied affinity binding: [bold]{' '.join(affinity_part)}[/bold]")
 
     try:
         if parse_results or hide_logs:
@@ -645,9 +1218,7 @@ def execute_runcpu(
                     TimeElapsedColumn(),
                     transient=True,
                 ) as progress:
-                    task = progress.add_task(
-                        description="Running SPEC benchmarks...", total=None
-                    )
+                    task = progress.add_task(description="Running SPEC benchmarks...", total=None)
 
                     # Use Popen for real-time output monitoring
                     process = subprocess.Popen(
@@ -669,14 +1240,9 @@ def execute_runcpu(
 
                             # Try to detect current benchmark
                             detected_benchmark = parse_benchmark_from_output(line)
-                            if (
-                                detected_benchmark
-                                and detected_benchmark != current_benchmark
-                            ):
+                            if detected_benchmark and detected_benchmark != current_benchmark:
                                 current_benchmark = detected_benchmark
-                                progress.update(
-                                    task, description=f"Running {current_benchmark}..."
-                                )
+                                progress.update(task, description=f"Running {current_benchmark}...")
 
                     # Wait for process to complete
                     process.wait()
@@ -715,9 +1281,7 @@ def execute_runcpu(
                 text=True,
                 capture_output=False,
             )
-            result = ProcessResult(
-                returncode=subprocess_result.returncode, stdout="", stderr=""
-            )
+            result = ProcessResult(returncode=subprocess_result.returncode, stdout="", stderr="")
             output = ""
 
         if result.returncode != 0:
@@ -817,62 +1381,24 @@ def display_results_with_rich(
             elif data.get("warning"):
                 # Has results but SPEC flagged it
                 status = "[yellow]Warning[/yellow]"
-                ratio = (
-                    f"{data.get('ratio', 'N/A'):.2f}"
-                    if isinstance(data.get("ratio"), int | float)
-                    else "N/A"
-                )
-                time = (
-                    f"{data.get('time', 'N/A'):.1f}"
-                    if isinstance(data.get("time"), int | float)
-                    else "N/A"
-                )
+                ratio = f"{data.get('ratio', 'N/A'):.2f}" if isinstance(data.get("ratio"), int | float) else "N/A"
+                time = f"{data.get('time', 'N/A'):.1f}" if isinstance(data.get("time"), int | float) else "N/A"
                 reference = (
-                    f"{data.get('reference', 'N/A'):.0f}"
-                    if isinstance(data.get("reference"), int | float)
-                    else "N/A"
+                    f"{data.get('reference', 'N/A'):.0f}" if isinstance(data.get("reference"), int | float) else "N/A"
                 )
-                copies = (
-                    f"{data.get('copies', 'N/A')}"
-                    if data.get("copies") is not None
-                    else "N/A"
-                )
-                threads = (
-                    f"{data.get('threads', 'N/A')}"
-                    if data.get("threads") is not None
-                    else "N/A"
-                )
+                copies = f"{data.get('copies', 'N/A')}" if data.get("copies") is not None else "N/A"
+                threads = f"{data.get('threads', 'N/A')}" if data.get("threads") is not None else "N/A"
             else:
                 status = "[green]Success[/green]"
-                ratio = (
-                    f"{data.get('ratio', 'N/A'):.2f}"
-                    if isinstance(data.get("ratio"), int | float)
-                    else "N/A"
-                )
-                time = (
-                    f"{data.get('time', 'N/A'):.1f}"
-                    if isinstance(data.get("time"), int | float)
-                    else "N/A"
-                )
+                ratio = f"{data.get('ratio', 'N/A'):.2f}" if isinstance(data.get("ratio"), int | float) else "N/A"
+                time = f"{data.get('time', 'N/A'):.1f}" if isinstance(data.get("time"), int | float) else "N/A"
                 reference = (
-                    f"{data.get('reference', 'N/A'):.0f}"
-                    if isinstance(data.get("reference"), int | float)
-                    else "N/A"
+                    f"{data.get('reference', 'N/A'):.0f}" if isinstance(data.get("reference"), int | float) else "N/A"
                 )
-                copies = (
-                    f"{data.get('copies', 'N/A')}"
-                    if data.get("copies") is not None
-                    else "N/A"
-                )
-                threads = (
-                    f"{data.get('threads', 'N/A')}"
-                    if data.get("threads") is not None
-                    else "N/A"
-                )
+                copies = f"{data.get('copies', 'N/A')}" if data.get("copies") is not None else "N/A"
+                threads = f"{data.get('threads', 'N/A')}" if data.get("threads") is not None else "N/A"
 
-            bench_table.add_row(
-                benchmark, status, ratio, time, reference, copies, threads
-            )
+            bench_table.add_row(benchmark, status, ratio, time, reference, copies, threads)
 
         console.print(bench_table)
         console.print()
