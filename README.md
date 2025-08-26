@@ -32,6 +32,10 @@ specer setup gcc --config myconfig.cfg --spec-root /opt/spec2017
 export SPEC_PATH=/opt/spec2017
 specer run gcc --cores 8
 
+# Skip compilation for faster execution (benchmarks must be pre-compiled)
+specer compile gcc --cores 8          # Compile once
+specer run gcc --skip-compile --cores 8  # Run without recompiling (faster)
+
 # Synchronized execution with EvalSync (requires environment variables)
 export EVALSYNC_EXPERIMENT_ID=my_experiment
 export EVALSYNC_CLIENT_ID=client1

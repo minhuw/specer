@@ -1,6 +1,5 @@
 """Compile command for SPEC CPU 2017 benchmarks."""
 
-import contextlib
 import re
 from pathlib import Path
 from typing import Annotated
@@ -272,9 +271,6 @@ def compile_command(
                 )
         else:
             typer.echo(f"Would execute: {' '.join(cmd)}")
-        # Clean up generated config file if in dry-run mode
-        if generated_config_path:
-            Path(generated_config_path).unlink()
         return
 
     # Execute the command
@@ -285,8 +281,3 @@ def compile_command(
         cpu_cores=cpu_cores,
         numa_memory=numa_memory,
     )
-
-    # Clean up generated config file after execution
-    if generated_config_path:
-        with contextlib.suppress(OSError):
-            Path(generated_config_path).unlink()

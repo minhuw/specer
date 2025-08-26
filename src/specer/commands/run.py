@@ -1,6 +1,5 @@
 """Run command for SPEC CPU 2017 benchmarks."""
 
-import contextlib
 import re
 import time
 from pathlib import Path
@@ -16,6 +15,7 @@ from specer.sync import create_evalsync_worker
 from specer.utils import (
     build_affinity_command,
     build_runcpu_command,
+    check_benchmarks_compiled,
     convert_benchmark_names,
     detect_suite_preference,
     display_results_with_rich,
@@ -235,6 +235,13 @@ def run_command(
             help="Compiler to use for auto-generated config ('gcc', 'intel', 'oneapi'). Auto-detects if not specified.",
         ),
     ] = None,
+    skip_compile: Annotated[
+        bool,
+        typer.Option(
+            "--skip-compile",
+            help="Skip compilation phase and run only if benchmarks are already compiled (uses runcpu --nobuild flag)",
+        ),
+    ] = False,
 ) -> None:
     """Run SPEC CPU 2017 benchmarks.
 
@@ -278,11 +285,19 @@ def run_command(
         specer run intrate --compiler intel --cores 16      # Use Intel oneAPI (auto-detected)
         specer run fprate --compiler oneapi --cores 8       # Explicit Intel oneAPI
         specer run gcc --compiler gcc --cores 4             # Force GCC usage
+
+        # Skip compilation (run only):
+        specer run gcc --skip-compile                        # Run without recompiling (faster)
+        specer run intrate --skip-compile --cores 16         # Skip compile with custom settings
     """
     # Validate mutually exclusive options
     if speed and rate:
         typer.echo("Error: --speed and --rate options are mutually exclusive", err=True)
         raise typer.Exit(1)
+
+    # Validate skip_compile compatibility
+    if skip_compile and rebuild:
+        typer.echo("Warning: --skip-compile and --rebuild are contradictory. --rebuild will be ignored.", err=True)
 
     # Validate reportable mode requirements
     if reportable:
@@ -455,6 +470,31 @@ def run_command(
     # (spec_root was already resolved earlier for config generation)
     logger.debug("🐛 Building runcpu command")
 
+    if skip_compile:
+        logger.debug("🐛 Using --nobuild flag to skip compilation")
+
+        # Check if benchmarks are compiled when using skip_compile
+        if not dry_run:  # Only check during actual execution
+            logger.debug("🐛 Checking compilation status of benchmarks")
+            compilation_status = check_benchmarks_compiled(
+                converted_benchmarks,
+                Path(effective_config).stem if effective_config else "unknown",
+                tune or "base",
+                effective_spec_root,
+            )
+
+            uncompiled_benchmarks = [bench for bench, compiled in compilation_status.items() if not compiled]
+
+            if uncompiled_benchmarks:
+                typer.echo(
+                    f"Warning: The following benchmarks may not be compiled: {', '.join(uncompiled_benchmarks)}",
+                    err=True,
+                )
+                typer.echo(
+                    "Consider running 'specer compile' first or remove --skip-compile to compile automatically.",
+                    err=True,
+                )
+
     cmd = build_runcpu_command(
         action="run",
         benchmarks=converted_benchmarks,
@@ -472,11 +512,15 @@ def run_command(
         reportable=reportable,
         noreportable=noreportable,
         output_formats=output_formats,
+        nobuild=skip_compile,
     )
 
     logger.debug(f"🐛 Built runcpu command: {' '.join(cmd)}")
 
     if dry_run:
+        if skip_compile:
+            typer.echo("🚀 Skip compilation mode: Using --nobuild flag (benchmarks must be pre-compiled)")
+
         # Show what the final command would look like with affinity
         if numa_node is not None or cpu_cores is not None:
             final_cmd = build_affinity_command(cmd, numa_node, cpu_cores, numa_memory)
@@ -487,9 +531,6 @@ def run_command(
                 )
         else:
             typer.echo(f"Would execute: {' '.join(cmd)}")
-        # Clean up generated config file if in dry-run mode
-        if generated_config_path:
-            Path(generated_config_path).unlink()
         return
 
     # Determine if we should use rich output and parse results
@@ -636,11 +677,6 @@ def run_command(
                 )
             else:
                 typer.echo(f"\n💾 Results saved to: {json_path}")
-
-    # Clean up generated config file after execution
-    if generated_config_path:
-        with contextlib.suppress(OSError):
-            Path(generated_config_path).unlink()
 
     # Clean up EvalSync worker
     if evalsync_worker:

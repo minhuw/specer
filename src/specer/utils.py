@@ -4,7 +4,6 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -914,14 +913,41 @@ def generate_config_from_template(
                 f"   copies           = {default_cores}   # EDIT to change number of copies (see above)",
             )
 
-        # Create a temporary config file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".cfg", prefix="specer_generated_", delete=False
-        ) as temp_file:
-            temp_file.write(template_content)
-            temp_file_name = temp_file.name
+        # Create a deterministic config file name based on parameters
+        # This ensures the same parameters always generate the same config file name
+        import hashlib
 
-        return temp_file_name
+        # Create a hash based on the key parameters that affect compilation
+        param_string = f"cores:{cores}_tune:{tune}_compiler:{effective_compiler}"
+        if config_add:
+            param_string += f"_additions:{sorted(config_add)}"
+
+        config_hash = hashlib.md5(param_string.encode(), usedforsecurity=False).hexdigest()[:8]
+        config_filename = f"specer_{effective_compiler}_{config_hash}.cfg"
+
+        # Use SPEC's config directory for persistence (so SPEC can write checksums back)
+        spec_config_dir = Path(spec_path) / "config" / "specer"
+        spec_config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = spec_config_dir / config_filename
+
+        # Check if config file already exists with SPEC-generated checksums
+        if config_path.exists():
+            # Read existing config to check if it has checksums (indicating previous compilation)
+            existing_content = config_path.read_text()
+            if (
+                "opthash=" in existing_content
+                or "exehash=" in existing_content
+                or "# Last updated" in existing_content
+                or "baggage=" in existing_content
+            ):
+                # This config has been used for compilation before, reuse it
+                logger.debug(f"🐛 Reusing existing config with checksums: {config_path}")
+                return str(config_path)
+
+        # Write the new config file (SPEC will add checksums after compilation)
+        config_path.write_text(template_content)
+        logger.debug(f"🐛 Created new config file: {config_path}")
+        return str(config_path)
 
     except Exception:
         # If anything goes wrong, return None
@@ -945,6 +971,7 @@ def build_runcpu_command(
     reportable: bool = False,
     noreportable: bool = False,
     output_formats: str | None = None,
+    nobuild: bool = False,
 ) -> list[str]:
     """Build the runcpu command with the given parameters."""
     # Start with the base command
@@ -1023,11 +1050,69 @@ def build_runcpu_command(
     if ignore_errors:
         cmd.append("--ignore_errors")
 
+    # Add nobuild flag
+    if nobuild:
+        cmd.append("--nobuild")
+
     # Add benchmarks (skip for update action)
     if action != "update":
         cmd.extend(benchmarks)
 
     return cmd
+
+
+def check_benchmarks_compiled(
+    benchmarks: list[str],
+    config: str,
+    _tune: str = "base",
+    spec_root: Path | None = None,
+) -> dict[str, bool]:
+    """Check if benchmarks are already compiled for the given configuration.
+
+    Args:
+        benchmarks: List of benchmark names to check
+        config: Configuration name
+        tune: Tuning level (base, peak, all)
+        spec_root: SPEC CPU 2017 installation directory
+
+    Returns:
+        Dictionary mapping benchmark names to compilation status (True if compiled)
+    """
+    if not spec_root:
+        spec_root = validate_and_get_spec_root(None)
+
+    compilation_status = {}
+
+    for benchmark in benchmarks:
+        # Skip suite names that aren't individual benchmarks
+        if benchmark.lower() in {"intspeed", "intrate", "fpspeed", "fprate", "all", "specspeed", "specrate"}:
+            continue
+
+        # Check if the benchmark executable exists in the expected location
+        # SPEC CPU 2017 stores compiled binaries in benchspec/CPU/<benchmark>/exe/
+        benchmark_exe_dir = spec_root / "benchspec" / "CPU" / benchmark / "exe"
+
+        # Look for executable files in the exe directory
+        # The exact naming depends on the config and tune level
+        is_compiled = False
+
+        if benchmark_exe_dir.exists():
+            # Check for any executable files (they typically have config name in them)
+            exe_files = list(benchmark_exe_dir.glob("*"))
+            # Filter for actual executable files (not directories or other files)
+            exe_files = [f for f in exe_files if f.is_file() and not f.name.startswith(".")]
+
+            if exe_files:
+                # Additional check: look for files that match the config pattern
+                config_pattern = f"*{config}*"
+                config_specific_files = list(benchmark_exe_dir.glob(config_pattern))
+                config_specific_files = [f for f in config_specific_files if f.is_file()]
+
+                is_compiled = len(config_specific_files) > 0 or len(exe_files) > 0
+
+        compilation_status[benchmark] = is_compiled
+
+    return compilation_status
 
 
 def validate_numa_topology() -> dict[str, Any] | None:
