@@ -10,10 +10,10 @@
       },
       "evalsync": {
         "is_direct": false,
-        "sha256": "93b5d9dd97e6734247d132730983717f77bece7e77afa0effb88ce0be09de482",
+        "sha256": "3a6d18b674b378d2a98d737d2287890abd0e6f9d785a7adc2f616a58f1e80962",
         "type": "url",
-        "url": "https://files.pythonhosted.org/packages/bd/d3/7a4a1e28b5dd733b7850d7e9e6827d6de7b310262d68baa47d9791c66d71/evalsync-0.3.1-py3-none-any.whl",
-        "version": "0.3.1"
+        "url": "https://files.pythonhosted.org/packages/1f/80/34daa4f7fad55344d52da629942fea9e24b853e7f690227373b22a0bceee/evalsync-0.6.0-py3-none-any.whl",
+        "version": "0.6.0"
       },
       "hatchling": {
         "is_direct": false,
@@ -94,10 +94,10 @@
       },
       "pyzmq": {
         "is_direct": false,
-        "sha256": "f5b6133c8d313bde8bd0d123c169d22525300ff164c2189f849de495e1344577",
+        "sha256": "340e7cddc32f147c6c00d116a3f284ab07ee63dbd26c52be13b590520434533c",
         "type": "url",
-        "url": "https://files.pythonhosted.org/packages/7e/0a/2356305c423a975000867de56888b79e44ec2192c690ff93c3109fd78081/pyzmq-27.0.1-cp312-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
-        "version": "27.0.1"
+        "url": "https://files.pythonhosted.org/packages/0e/66/d781ab0636570d32c745c4e389b1c6b713115905cca69ab6233508622edd/pyzmq-27.0.2-cp312-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
+        "version": "27.0.2"
       },
       "rich": {
         "is_direct": false,
@@ -115,10 +115,10 @@
       },
       "trove-classifiers": {
         "is_direct": false,
-        "sha256": "c4e7fc83012770d80b3ae95816111c32b085716374dccee0d3fbf5c235495f9f",
+        "sha256": "887fb0a402bdbecd4415a52c06e6728f8bdaa506a7143372d2b893e2c5e2d859",
         "type": "url",
-        "url": "https://files.pythonhosted.org/packages/d5/44/323a87d78f04d5329092aada803af3612dd004a64b69ba8b13046601a8c9/trove_classifiers-2025.8.6.13-py3-none-any.whl",
-        "version": "2025.8.6.13"
+        "url": "https://files.pythonhosted.org/packages/4a/40/d54944eeb5646fb4b1c98d4601fe5e0812dd2e7c0aa94d53fc46457effc8/trove_classifiers-2025.8.26.11-py3-none-any.whl",
+        "version": "2025.8.26.11"
       },
       "typer": {
         "is_direct": false,
@@ -129,14 +129,13 @@
       },
       "typing-extensions": {
         "is_direct": false,
-        "sha256": "d1e1e3b58374dc93031d6eda2420a48ea44a36c2b4766a4fdeb3710755731d76",
+        "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
         "type": "url",
-        "url": "https://files.pythonhosted.org/packages/b5/00/d631e67a838026495268c2f6884f3711a15a9a2a96cd244fdaea53b823fb/typing_extensions-4.14.1-py3-none-any.whl",
-        "version": "4.14.1"
+        "url": "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+        "version": "4.15.0"
       }
     },
     "targets": {
-      "all": {},
       "default": {
         "click": [],
         "evalsync": [
@@ -183,5 +182,5 @@
       }
     }
   },
-  "invalidationHash": "a390de362c8906c0d7c423461593c49784ad7dab1ed03e3e1db0772960f5fa05"
+  "invalidationHash": "60428f537356c15da78b506bf2003e9199852ac8343d3d87d4bbfc68b4a46016"
 }
