@@ -646,23 +646,31 @@ def generate_intel_config_additions(oneapi_path: str) -> list[str]:
     logger.info(f"🔧 Generated LDFLAGS: {ldflags}")
     logger.info(f"🔧 Generated CPPFLAGS: {cppflags}")
 
-    for suite in suites:
-        # Base tuning level configurations
+    # Restrict Intel compiler to floating-point suites only due to C++ compatibility issues in integer suites
+    fp_suites = [suite for suite in suites if suite in ["fprate", "fpspeed"]]
+
+    if len(fp_suites) < len(suites):
+        excluded_suites = [suite for suite in suites if suite not in fp_suites]
+        logger.info(f"🔧 Intel compiler restricted to floating-point suites only. Excluded suites: {excluded_suites}")
+        logger.info(f"🔧 Processing floating-point suites: {fp_suites}")
+
+    for suite in fp_suites:
+        # Floating-point suites only: Use aggressive optimization where Intel compiler excels
         base_configs = [
             f"{suite}=base:CC={cc_compiler}",
             f"{suite}=base:CXX={cxx_compiler}",
-            # Intel-specific optimizations
-            f"{suite}=base:OPTIMIZE=-O3 -xHost -ipo",
-            f"{suite}=base:COPTIMIZE=-O3 -xHost -ipo",
-            f"{suite}=base:CXXOPTIMIZE=-O3 -xHost -ipo",
+            f"{suite}=base:OPTIMIZE=-w -m64 -Wl,-z,muldefs -xHost -Ofast -ffast-math -flto -mfpmath=sse -funroll-loops -qopt-mem-layout-trans=4 -mprefer-vector-width=512",
+            f"{suite}=base:COPTIMIZE=-w -std=c11 -m64 -Wl,-z,muldefs -xHost -Ofast -ffast-math -flto -mfpmath=sse -funroll-loops -qopt-mem-layout-trans=4 -Wno-implicit-int -mprefer-vector-width=512",
+            f"{suite}=base:CXXOPTIMIZE=-w -std=c++14 -m64 -Wl,-z,muldefs -xHost -Ofast -ffast-math -flto -mfpmath=sse -funroll-loops -qopt-mem-layout-trans=4 -mprefer-vector-width=512",
         ]
 
         # Add Fortran compiler and optimization if available
         if fc_compiler:
+            # Floating-point suites: Aggressive Fortran optimization
             base_configs.extend(
                 [
                     f"{suite}=base:FC={fc_compiler}",
-                    f"{suite}=base:FOPTIMIZE=-O3 -xHost -ipo",
+                    f"{suite}=base:FOPTIMIZE=-w -m64 -Wl,-z,muldefs -xHost -Ofast -ffast-math -flto -mfpmath=sse -funroll-loops -qopt-mem-layout-trans=4 -nostandard-realloc-lhs -align array32byte -auto",
                 ]
             )
 
@@ -674,31 +682,9 @@ def generate_intel_config_additions(oneapi_path: str) -> list[str]:
 
         config_additions.extend(base_configs)
 
-        # Peak tuning level configurations (more aggressive optimizations)
-        peak_configs = [
-            f"{suite}=peak:CC={cc_compiler}",
-            f"{suite}=peak:CXX={cxx_compiler}",
-            f"{suite}=peak:OPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
-            f"{suite}=peak:COPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
-            f"{suite}=peak:CXXOPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
-        ]
-
-        # Add Fortran compiler and optimization if available
-        if fc_compiler:
-            peak_configs.extend(
-                [
-                    f"{suite}=peak:FC={fc_compiler}",
-                    f"{suite}=peak:FOPTIMIZE=-O3 -xHost -ipo -ffast-math -funroll-loops",
-                ]
-            )
-
-        # Add library and include paths if available
-        if ldflags:
-            peak_configs.append(f"{suite}=peak:LDFLAGS={ldflags}")
-        if cppflags:
-            peak_configs.append(f"{suite}=peak:CPPFLAGS={cppflags}")
-
-        config_additions.extend(peak_configs)
+        # Use basepeak for floating-point suites - reuse base configuration for peak runs
+        # This simplifies configuration and avoids potential peak-specific compilation issues
+        config_additions.append(f"{suite}=peak: basepeak = yes")
 
     logger.info(f"✅ Generated {len(config_additions)} Intel oneAPI configuration entries")
     return config_additions
