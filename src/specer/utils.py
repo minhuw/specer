@@ -731,10 +731,13 @@ def generate_config_from_template(
         # Read the template content
         template_content = template_path.read_text()
 
-        # Update label to "specer"
-        template_content = template_content.replace(
-            '%   define label "mytest"           # (2)      Use a label meaningful to *you*.',
-            '%   define label "specer"           # (2)      Use a label meaningful to *you*.',
+        # Update label to "specer". SPEC CPU 2017 template formatting differs
+        # across ISO releases, so match the define line rather than one literal.
+        template_content = re.sub(
+            r'(?m)^(%\s*define\s+label\s+)(?:"[^"]+"|\S+)(.*)$',
+            r'\1"specer"\2',
+            template_content,
+            count=1,
         )
 
         # Determine which compiler to use
@@ -799,21 +802,26 @@ def generate_config_from_template(
             # Auto-detect GCC version and uncomment GCCge10 if needed
             gcc_version = detect_gcc_version()
             if gcc_version and gcc_version >= 10:
-                # Uncomment the GCCge10 define for GCC 10+
-                old_line = "#%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later"
-                new_line = (
-                    "%define GCCge10  # EDIT: remove the '#' from column 1 if using GCC 10 or later (auto-detected)"
+                # Uncomment the GCCge10 define for GCC 10+ if the template has it.
+                template_content = re.sub(
+                    r"(?m)^#\s*(%define\s+GCCge10\b.*)$",
+                    r"\1 (auto-detected)",
+                    template_content,
+                    count=1,
                 )
-                template_content = template_content.replace(old_line, new_line)
 
             # Auto-detect GCC path and update gcc_dir
             gcc_path = detect_gcc_path()
             if gcc_path:
                 logger.debug(f"🐛 Detected GCC path: {gcc_path}")
-                # Replace the gcc_dir define (this handles both the main and conditional cases)
-                old_line = '%   define  gcc_dir        "/opt/rh/devtoolset-9/root/usr"  # EDIT (see above)'
-                new_line = f'%   define  gcc_dir        "{gcc_path}"  # EDIT (see above) (auto-detected)'
-                template_content = template_content.replace(old_line, new_line, 1)
+                # Replace the gcc_dir define. SPEC CPU 2017 v1.0.x and later
+                # templates use slightly different whitespace and quoting.
+                template_content = re.sub(
+                    r'(?m)^(%\s*define\s+gcc_dir\s+)(?:"[^"]+"|\S+)(.*)$',
+                    rf'\1"{gcc_path}"\2 (auto-detected)',
+                    template_content,
+                    count=1,
+                )
                 logger.debug("🐛 Updated GCC directory in config template")
             else:
                 logger.warning("⚠️  Could not detect GCC path, using default in template")
