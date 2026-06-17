@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import signal
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -45,10 +46,11 @@ BENCHMARK_MAPPING: dict[str, tuple[str, str]] = {
 class ProcessResult:
     """Simple result object compatible with subprocess.run."""
 
-    def __init__(self, returncode: int, stdout: str, stderr: str):
+    def __init__(self, returncode: int, stdout: str, stderr: str, timed_out: bool = False):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+        self.timed_out = timed_out
 
 
 def validate_and_get_spec_root(spec_root: Path | None) -> Path:
@@ -1261,6 +1263,7 @@ def execute_runcpu(
     numa_node: int | None = None,
     cpu_cores: str | None = None,
     numa_memory: bool | None = None,
+    duration: int | None = None,
 ) -> dict[str, Any] | None:
     """Execute the runcpu command and optionally parse results.
 
@@ -1274,6 +1277,7 @@ def execute_runcpu(
         numa_node: NUMA node to bind process to
         cpu_cores: CPU cores to bind process to
         numa_memory: Whether to bind memory to the same NUMA node
+        duration: Maximum seconds to run before terminating runcpu
 
     Returns:
         Dictionary containing result information if parse_results=True, otherwise None
@@ -1288,6 +1292,27 @@ def execute_runcpu(
             logger.info(f"ℹ️  Applied affinity binding: [bold]{' '.join(affinity_part)}[/bold]")
 
     try:
+        if duration is not None:
+            result = execute_runcpu_for_duration(
+                final_cmd,
+                duration=duration,
+                verbose=verbose,
+                hide_logs=hide_logs,
+            )
+            if result.stdout and (verbose or not hide_logs):
+                typer.echo(result.stdout)
+            if result.stderr and (verbose or not hide_logs):
+                typer.echo(result.stderr, err=True)
+            if not result.timed_out and result.returncode != 0:
+                logger.error(f"❌ Command failed with exit code {result.returncode}")
+                raise typer.Exit(result.returncode)
+            return {
+                "completed": not result.timed_out,
+                "exit_reason": "duration" if result.timed_out else "completed",
+                "duration": duration,
+                "returncode": result.returncode,
+            }
+
         if parse_results or hide_logs:
             # Capture output for parsing or when hiding logs
             if hide_logs and show_progress:
@@ -1387,6 +1412,51 @@ def execute_runcpu(
     except KeyboardInterrupt as err:
         logger.warning("⚠️  Operation cancelled by user")
         raise typer.Exit(130) from err
+
+
+def execute_runcpu_for_duration(
+    final_cmd: list[str],
+    duration: int,
+    verbose: bool = False,
+    hide_logs: bool = False,
+) -> ProcessResult:
+    """Execute runcpu for a fixed duration and terminate its process group."""
+    if duration <= 0:
+        typer.echo("Error: --duration must be greater than 0", err=True)
+        raise typer.Exit(1)
+
+    process = subprocess.Popen(
+        final_cmd,
+        stdout=None if verbose and not hide_logs else subprocess.PIPE,
+        stderr=None if verbose and not hide_logs else subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=duration)
+        return ProcessResult(process.returncode, stdout or "", stderr or "")
+    except subprocess.TimeoutExpired:
+        logger.info(f"⏱️  Duration reached ({duration}s), terminating SPEC run")
+        try:
+            os.killpg(process.pid, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                stdout, stderr = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                stdout, stderr = process.communicate()
+        return ProcessResult(process.returncode, stdout or "", stderr or "", timed_out=True)
 
 
 def display_results_with_rich(

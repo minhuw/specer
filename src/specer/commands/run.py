@@ -242,6 +242,13 @@ def run_command(
             help="Skip compilation phase and run only if benchmarks are already compiled (uses runcpu --nobuild flag)",
         ),
     ] = False,
+    duration: Annotated[
+        int | None,
+        typer.Option(
+            "--duration",
+            help="Run for a fixed number of seconds, then terminate SPEC and report timing metadata",
+        ),
+    ] = None,
 ) -> None:
     """Run SPEC CPU 2017 benchmarks.
 
@@ -289,6 +296,7 @@ def run_command(
         # Skip compilation (run only):
         specer run gcc --skip-compile                        # Run without recompiling (faster)
         specer run intrate --skip-compile --cores 16         # Skip compile with custom settings
+        specer run gcc --skip-compile --duration 60          # Fixed-duration counter-measurement run
     """
     # Validate mutually exclusive options
     if speed and rate:
@@ -298,6 +306,10 @@ def run_command(
     # Validate skip_compile compatibility
     if skip_compile and rebuild:
         typer.echo("Warning: --skip-compile and --rebuild are contradictory. --rebuild will be ignored.", err=True)
+
+    if duration is not None and duration <= 0:
+        typer.echo("Error: --duration must be greater than 0", err=True)
+        raise typer.Exit(1)
 
     # Validate reportable mode requirements
     if reportable:
@@ -520,6 +532,8 @@ def run_command(
     if dry_run:
         if skip_compile:
             typer.echo("🚀 Skip compilation mode: Using --nobuild flag (benchmarks must be pre-compiled)")
+        if duration is not None:
+            typer.echo(f"⏱️  Fixed-duration mode: {duration}s")
 
         # Show what the final command would look like with affinity
         if numa_node is not None or cpu_cores is not None:
@@ -573,6 +587,7 @@ def run_command(
             numa_node=numa_node,
             cpu_cores=cpu_cores,
             numa_memory=numa_memory,
+            duration=duration,
         )
         end_time = time.time()
         total_elapsed = end_time - start_time
@@ -616,6 +631,8 @@ def run_command(
 
         # Add timing information
         enriched_results["execution_time"] = total_elapsed
+        if duration is not None:
+            enriched_results["fixed_duration"] = duration
 
         # Display results based on output preference
         if use_rich:
@@ -677,6 +694,14 @@ def run_command(
                 )
             else:
                 typer.echo(f"\n💾 Results saved to: {json_path}")
+    elif json_output is not None:
+        json_path = save_results_to_json(
+            {"completed": True, "execution_time": total_elapsed},
+            output_file=json_output if json_output else None,
+            benchmarks=converted_benchmarks,
+            config=effective_config,
+        )
+        typer.echo(f"\n💾 Results saved to: {json_path}")
 
     # Clean up EvalSync worker
     if evalsync_worker:
